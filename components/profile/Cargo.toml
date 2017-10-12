@@ -11,7 +11,7 @@ path = "lib.rs"
 
 [dependencies]
 profile_traits = {path = "../profile_traits"}
-influent = "0.4"
+influent = { version = "0.4", default_features = false }
 ipc-channel = "0.8"
 heartbeats-simple = "0.4"
 log = "0.3.5"
