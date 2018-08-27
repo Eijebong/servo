@@ -45,8 +45,8 @@ use dom::window::Window;
 use dom_struct::dom_struct;
 use encoding_rs::{Encoding, UTF_8};
 use html5ever::{LocalName, Prefix};
-use hyper::header::{Charset, ContentDisposition, ContentType, DispositionParam, DispositionType};
-use hyper::method::Method;
+use hyper::Method;
+use mime;
 use script_thread::MainThreadScriptMsg;
 use script_traits::LoadData;
 use servo_rand::random;
@@ -55,6 +55,7 @@ use std::cell::Cell;
 use style::attr::AttrValue;
 use style::str::split_html_space_chars;
 use task_source::TaskSource;
+use typed_headers::{Charset, ContentDisposition, ContentType, DispositionParam, DispositionType, HeaderMapExt};
 use url::UrlQuery;
 use url::form_urlencoded::Serializer;
 
@@ -379,23 +380,15 @@ impl HTMLFormElement {
                 // https://html.spec.whatwg.org/multipage/#submit-dialog
             },
             // https://html.spec.whatwg.org/multipage/#submit-mutate-action
-            ("http", FormMethod::FormGet) |
-            ("https", FormMethod::FormGet) |
-            ("data", FormMethod::FormGet) => {
-                load_data.headers.set(ContentType::form_url_encoded());
+            ("http", FormMethod::FormGet) | ("https", FormMethod::FormGet) | ("data", FormMethod::FormGet) => {
+                load_data.headers.typed_insert(&ContentType(mime::APPLICATION_WWW_FORM_URLENCODED));
                 self.mutate_action_url(&mut form_data, load_data, encoding, &target_window);
             },
             // https://html.spec.whatwg.org/multipage/#submit-body
             ("http", FormMethod::FormPost) | ("https", FormMethod::FormPost) => {
-                load_data.method = Method::Post;
-                self.submit_entity_body(
-                    &mut form_data,
-                    load_data,
-                    enctype,
-                    encoding,
-                    &target_window,
-                );
-            },
+                load_data.method = Method::POST;
+                self.submit_entity_body(&mut form_data, load_data, enctype, encoding, &target_window);
+            }
             // https://html.spec.whatwg.org/multipage/#submit-get-action
             ("file", _) |
             ("about", _) |
@@ -450,7 +443,7 @@ impl HTMLFormElement {
         let bytes = match enctype {
             FormEncType::UrlEncoded => {
                 let charset = encoding.name();
-                load_data.headers.set(ContentType::form_url_encoded());
+                load_data.headers.typed_insert(&ContentType(mime::APPLICATION_WWW_FORM_URLENCODED));
 
                 self.set_encoding_override(load_data.url.as_mut_url().query_pairs_mut())
                     .clear()
@@ -463,12 +456,13 @@ impl HTMLFormElement {
                 load_data.url.query().unwrap_or("").to_string().into_bytes()
             },
             FormEncType::FormDataEncoded => {
-                let mime = mime!(Multipart / FormData; Boundary =(&boundary));
-                load_data.headers.set(ContentType(mime));
+                //let mime = mime!(Multipart / FormData; Boundary =(&boundary));
+                let mime = format!("multipart/form-data; boundary={}", boundary).parse().unwrap();
+                load_data.headers.typed_insert(&ContentType(mime));
                 encode_multipart_form_data(form_data, boundary, encoding)
             },
             FormEncType::TextPlainEncoded => {
-                load_data.headers.set(ContentType(mime!(Text / Plain)));
+                load_data.headers.typed_insert(&ContentType(mime::TEXT_PLAIN));
                 self.encode_plaintext(form_data).into_bytes()
             },
         };
@@ -1255,16 +1249,11 @@ pub fn encode_multipart_form_data(
                         f.name().clone().into(),
                     ));
                 // https://tools.ietf.org/html/rfc7578#section-4.4
-                let content_type = ContentType(
-                    f.upcast::<Blob>()
-                        .Type()
-                        .parse()
-                        .unwrap_or(mime!(Text / Plain)),
-                );
-                let mut type_bytes = format!(
-                    "Content-Disposition: {}\r\ncontent-type: {}\r\n\r\n",
-                    content_disposition, content_type
-                ).into_bytes();
+                let content_type = ContentType(f.upcast::<Blob>().Type()
+                                                .parse().unwrap_or(mime::TEXT_PLAIN));
+                let mut type_bytes = format!("Content-Disposition: {}\r\ncontent-type: {}\r\n\r\n",
+                                             content_disposition,
+                                             content_type.0.as_ref()).into_bytes();
                 result.append(&mut type_bytes);
 
                 let mut bytes = f.upcast::<Blob>().get_bytes().unwrap_or(vec![]);

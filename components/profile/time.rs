@@ -5,7 +5,7 @@
 //! Timing functions.
 
 use heartbeats;
-use influent::client::{Client, Credentials};
+use influent::client::Credentials;
 use influent::create_client;
 use influent::measurement::{Measurement, Value};
 use ipc_channel::ipc::{self, IpcReceiver};
@@ -454,7 +454,7 @@ impl Profiler {
                 };
 
                 let hosts = vec![hostname.as_str()];
-                let client = create_client(credentials, hosts);
+                let _client = create_client(credentials, hosts);
 
                 for (&(ref category, ref meta), ref mut data) in &mut self.buckets {
                     data.sort_by(|a, b| a.partial_cmp(b).expect("No NaN values in profiles"));
@@ -470,9 +470,11 @@ impl Profiler {
                         if let Some(ref meta) = *meta {
                             measurement.add_tag("host", meta.url.as_str());
                         };
+                        /*
                         if client.write_one(measurement, None).is_err() {
                             warn!("Could not write measurement to profiler db");
                         }
+                        */
                     }
                 }
             },
