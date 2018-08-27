@@ -30,6 +30,7 @@ opt-level = 3
 webdriver = { path = "../../mozilla-central/testing/webdriver" }
 hyper_serde = { path = "../hyper_serde" }
 influent = { path = "../influent.rs" }
+typed-headers = { path = "../typed-headers" }
 ws = { path = "../ws-rs" }
 
 [patch."https://github.com/servo/webrender"]

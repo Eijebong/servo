@@ -9,6 +9,7 @@ use http::{header, HeaderMap, StatusCode};
 use hyper_serde::Serde;
 use servo_arc::Arc;
 use servo_url::ServoUrl;
+use typed_headers::{AccessControlExposeHeaders, ContentType, HeaderMapExt};
 use std::sync::Mutex;
 use std::sync::atomic::AtomicBool;
 
@@ -249,21 +250,21 @@ impl Response {
             },
 
             ResponseType::Cors => {
-                let access = old_headers.get::<AccessControlExposeHeaders>();
+                let access = old_headers.typed_get::<AccessControlExposeHeaders>().unwrap_or(None);
                 let allowed_headers = access.as_ref().map(|v| &v[..]).unwrap_or(&[]);
 
-                let headers = old_headers.iter().filter(|header| {
-                    match &*header.name().to_ascii_lowercase() {
+                let headers = old_headers.iter().filter(|(name, _)| {
+                    match &*name.as_str().to_ascii_lowercase() {
                         "cache-control" | "content-language" | "content-type" |
                         "expires" | "last-modified" | "pragma" => true,
                         "set-cookie" | "set-cookie2" => false,
                         header => {
                             let result =
-                                allowed_headers.iter().find(|h| *header == *h.to_ascii_lowercase());
+                                allowed_headers.iter().find(|h| *header == h.as_str().to_ascii_lowercase());
                             result.is_some()
                         }
                     }
-                }).collect();
+                }).map(|(n, v)| (n.clone(), v.clone())).collect();
                 response.headers = headers;
             },
 
@@ -290,9 +291,9 @@ impl Response {
     pub fn metadata(&self) -> Result<FetchMetadata, NetworkError> {
         fn init_metadata(response: &Response, url: &ServoUrl) -> Metadata {
             let mut metadata = Metadata::default(url.clone());
-            metadata.set_content_type(match response.headers.get() {
-                Some(&ContentType(ref mime)) => Some(mime),
-                None => None,
+            metadata.set_content_type(match response.headers.typed_get::<ContentType>() {
+                Ok(Some(ContentType(ref mime))) => Some(mime),
+                _ => None,
             });
             metadata.location_url = response.location_url.clone();
             metadata.headers = Some(Serde(response.headers.clone()));

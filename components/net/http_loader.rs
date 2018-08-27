@@ -781,8 +781,8 @@ fn http_network_or_cache_fetch(request: &mut Request,
         },
 
         // Step 14
-            http_request.headers.set(CacheControl(vec![CacheDirective::MaxAge(0)]));
         CacheMode::NoCache if !http_request.headers.contains_key(header::CACHE_CONTROL) => {
+            http_request.headers.set(CacheControl(vec![CacheDirective::MaxAge(0)]));
         },
 
         // Step 15
@@ -793,8 +793,8 @@ fn http_network_or_cache_fetch(request: &mut Request,
             }
 
             // Substep 2
-                http_request.headers.set(CacheControl(vec![CacheDirective::NoCache]));
             if !http_request.headers.contains_key(header::CACHE_CONTROL) {
+                http_request.headers.set(CacheControl(vec![CacheDirective::NoCache]));
             }
         },
 

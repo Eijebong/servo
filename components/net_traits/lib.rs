@@ -22,6 +22,7 @@ extern crate num_traits;
 #[macro_use] extern crate serde;
 extern crate servo_arc;
 extern crate servo_url;
+extern crate typed_headers;
 extern crate url;
 extern crate uuid;
 extern crate webrender_api;
@@ -40,6 +41,7 @@ use msg::constellation_msg::HistoryStateId;
 use request::{Request, RequestInit};
 use response::{HttpsState, Response, ResponseInit};
 use servo_url::ServoUrl;
+use typed_headers::{HeaderMapExt, ContentType};
 use std::error::Error;
 use storage_thread::StorageThreadMsg;
 
@@ -413,7 +415,7 @@ pub struct Metadata {
 
     #[ignore_malloc_size_of = "Defined in hyper"]
     /// MIME type / subtype.
-    pub content_type: Option<Serde<Mime>>,
+    pub content_type: Option<Serde<ContentType>>,
 
     /// Character set.
     pub charset: Option<String>,
@@ -459,12 +461,11 @@ impl Metadata {
         }
 
         if let Some(mime) = content_type {
-            self.headers.as_mut().unwrap().set(ContentType(mime.clone()));
+            self.headers.as_mut().unwrap().typed_insert(&ContentType(mime.clone()));
             self.content_type = Some(Serde(ContentType(mime.clone())));
-            let Mime(_, _, ref parameters) = *mime;
-            for &(ref k, ref v) in parameters {
-                if Attr::Charset == *k {
-                    self.charset = Some(v.to_string());
+            for (name, value) in mime.params() {
+                if mime::CHARSET == name {
+                    self.charset = Some(value.to_string());
                 }
             }
         }
