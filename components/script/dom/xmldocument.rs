@@ -16,7 +16,7 @@ use dom::window::Window;
 use dom_struct::dom_struct;
 use js::jsapi::JSContext;
 use js::jsapi::JSObject;
-use mime::Mime;
+use mime::{self, Mime};
 use script_traits::DocumentActivity;
 use servo_url::{MutableOrigin, ServoUrl};
 use std::ptr::NonNull;

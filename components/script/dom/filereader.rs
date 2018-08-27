@@ -22,7 +22,7 @@ use dom::globalscope::GlobalScope;
 use dom::progressevent::ProgressEvent;
 use dom_struct::dom_struct;
 use encoding_rs::{Encoding, UTF_8};
-use hyper::mime::{Attr, Mime};
+use mime::{self, Mime};
 use js::jsapi::Heap;
 use js::jsapi::JSAutoCompartment;
 use js::jsapi::JSContext;
@@ -115,11 +115,10 @@ impl FileReaderSharedFunctionality {
         // Step 4 & 5
         encoding = encoding.or_else(|| {
             let resultmime = blob_type.parse::<Mime>().ok();
-            resultmime.and_then(|Mime(_, _, ref parameters)| {
-                parameters
-                    .iter()
-                    .find(|&&(ref k, _)| &Attr::Charset == k)
-                    .and_then(|&(_, ref v)| Encoding::for_label(v.as_str().as_bytes()))
+            resultmime.and_then(|mime| {
+                mime.params()
+                    .find(|(ref k, _)| &mime::CHARSET == k)
+                    .and_then(|(_, ref v)| Encoding::for_label(v.as_str_repr().as_bytes()))
             })
         });
 

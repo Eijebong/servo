@@ -43,6 +43,7 @@ extern crate fnv;
 extern crate gleam;
 extern crate half;
 #[macro_use] extern crate html5ever;
+extern crate http;
 #[macro_use]
 extern crate hyper;
 extern crate hyper_serde;
@@ -97,6 +98,8 @@ extern crate swapper;
 extern crate time;
 #[cfg(target_os = "linux")]
 extern crate tinyfiledialogs;
+#[macro_use]
+extern crate typed_headers;
 extern crate unicode_segmentation;
 extern crate url;
 extern crate utf8;

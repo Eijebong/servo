@@ -27,3 +27,13 @@ opt-level = 3
 #
 #     [patch."https://github.com/servo/<repository>"]
 #     <crate> = { path = "/path/to/local/checkout" }
+webdriver = { path = "../../mozilla-central/testing/webdriver" }
+hyper_serde = { path = "../hyper_serde" }
+influent = { path = "../influent.rs" }
+typed-headers = { path = "../typed-headers" }
+ws = { path = "../ws-rs" }
+mime = { path = "../mime" }
+
+[patch."https://github.com/servo/webrender"]
+webrender = { path = "../webrender/webrender" }
+webrender_api = { path = "../webrender/webrender_api" }
