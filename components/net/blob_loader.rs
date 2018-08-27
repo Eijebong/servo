@@ -3,14 +3,18 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use filemanager_thread::FileManager;
-use hyper::header::{Charset, ContentLength, ContentType, Headers};
-use hyper::header::{ContentDisposition, DispositionParam, DispositionType};
+//use hyper::header::{Charset, ContentLength, ContentType, Headers};
+//use hyper::header::{ContentDisposition, DispositionParam, DispositionType};
+use http::HeaderMap;
+use hyper::header;
+use mime;
 use ipc_channel::ipc;
 use mime::{Attr, Mime};
 use net_traits::NetworkError;
 use net_traits::blob_url_store::parse_blob_url;
 use net_traits::filemanager_thread::ReadFileProgress;
 use servo_url::ServoUrl;
+use percent_encoding::{percent_encoding, percent_encoding_http};
 
 // TODO: Check on GET
 // https://w3c.github.io/FileAPI/#requestResponseModel
@@ -20,7 +24,7 @@ use servo_url::ServoUrl;
 pub fn load_blob_sync
             (url: ServoUrl,
              filemanager: FileManager)
-             -> Result<(Headers, Vec<u8>), NetworkError> {
+             -> Result<(HeaderMap, Vec<u8>), NetworkError> {
     let (id, origin) = match parse_blob_url(&url) {
         Ok((id, origin)) => (id, origin),
         Err(()) => {

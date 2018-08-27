@@ -617,22 +617,22 @@ pub fn should_be_blocked_due_to_nosniff(destination: Destination, response_heade
     #[inline]
     fn is_javascript_mime_type(mime_type: &Mime) -> bool {
         let javascript_mime_types: [Mime; 16] = [
-            mime!(Application / ("ecmascript")),
-            mime!(Application / ("javascript")),
-            mime!(Application / ("x-ecmascript")),
-            mime!(Application / ("x-javascript")),
-            mime!(Text / ("ecmascript")),
-            mime!(Text / ("javascript")),
-            mime!(Text / ("javascript1.0")),
-            mime!(Text / ("javascript1.1")),
-            mime!(Text / ("javascript1.2")),
-            mime!(Text / ("javascript1.3")),
-            mime!(Text / ("javascript1.4")),
-            mime!(Text / ("javascript1.5")),
-            mime!(Text / ("jscript")),
-            mime!(Text / ("livescript")),
-            mime!(Text / ("x-ecmascript")),
-            mime!(Text / ("x-javascript")),
+            "application/ecmascript".parse().unwrap(),
+            "application/javascript".parse().unwrap(),
+            "application/x-ecmascript".parse().unwrap(),
+            "application/x-javascript".parse().unwrap(),
+            "text/ecmascript".parse().unwrap(),
+            "text/javascript".parse().unwrap(),
+            "text/javascript1.0".parse().unwrap(),
+            "text/javascript1.1".parse().unwrap(),
+            "text/javascript1.2".parse().unwrap(),
+            "text/javascript1.3".parse().unwrap(),
+            "text/javascript1.4".parse().unwrap(),
+            "text/javascript1.5".parse().unwrap(),
+            "text/jscript".parse().unwrap(),
+            "text/livescript".parse().unwrap(),
+            "text/x-ecmascript".parse().unwrap(),
+            "text/x-javascript".parse().unwrap(),
         ];
 
         javascript_mime_types.iter()
@@ -663,16 +663,21 @@ fn should_be_blocked_due_to_mime_type(destination: Destination, response_headers
         None => return false,
     };
 
-    // Step 2-3
-    destination.is_script_like() && match *mime_type {
-        ContentType(Mime(TopLevel::Audio, _, _)) |
-        ContentType(Mime(TopLevel::Video, _, _)) |
-        ContentType(Mime(TopLevel::Image, _, _)) => true,
-        ContentType(Mime(TopLevel::Text, SubLevel::Ext(ref ext), _)) => ext == "csv",
+    let mime_type = match mime_type.parse() {
+        Ok(mime) => mime,
+        Err(_) => return false,
+    };
 
-        // Step 4
-        _ => false,
-    }
+    // Step 2-3
+    destination.is_script_like() &&
+        match mime_type.type_() {
+            mime::AUDIO |
+            mime::VIDEO |
+            mime::IMAGE |
+            mime::TEXT if mime_type.subtype() == mime::CSV => true,
+            // Step 4
+            _ => false
+        }
 }
 
 /// <https://fetch.spec.whatwg.org/#block-bad-port>

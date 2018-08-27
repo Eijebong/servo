@@ -925,6 +925,7 @@ impl MallocSizeOf for xml5ever::QualName {
     }
 }
 
+/*
 #[cfg(feature = "servo")]
 impl MallocSizeOf for hyper::header::Headers {
     fn size_of(&self, ops: &mut MallocSizeOfOps) -> usize {
@@ -942,33 +943,7 @@ impl MallocSizeOf for hyper::header::ContentType {
         self.0.size_of(ops)
     }
 }
-
-#[cfg(feature = "servo")]
-impl MallocSizeOf for hyper::mime::Mime {
-    fn size_of(&self, ops: &mut MallocSizeOfOps) -> usize {
-        self.0.size_of(ops) +
-        self.1.size_of(ops) +
-        self.2.size_of(ops)
-    }
-}
-
-#[cfg(feature = "servo")]
-impl MallocSizeOf for hyper::mime::Attr {
-    fn size_of(&self, ops: &mut MallocSizeOfOps) -> usize {
-        match *self {
-            hyper::mime::Attr::Ext(ref s) => s.size_of(ops),
-            _ => 0,
-        }
-    }
-}
-
-#[cfg(feature = "servo")]
-impl MallocSizeOf for hyper::mime::Value {
-    fn size_of(&self, _ops: &mut MallocSizeOfOps) -> usize {
-        self.len() // Length of string value in bytes (not the char length of a string)!
-    }
-}
-
+*/
 #[cfg(feature = "servo")]
 malloc_size_of_is_0!(time::Duration);
 #[cfg(feature = "servo")]
@@ -993,12 +968,9 @@ impl<T> MallocSizeOf for std::sync::mpsc::Sender<T> {
 }
 
 #[cfg(feature = "servo")]
-impl MallocSizeOf for hyper::status::StatusCode {
-    fn size_of(&self, ops: &mut MallocSizeOfOps) -> usize {
-        match *self {
-            hyper::status::StatusCode::Unregistered(u) => u.size_of(ops),
-            _ => 0,
-        }
+impl MallocSizeOf for hyper::StatusCode {
+    fn size_of(&self, _ops: &mut MallocSizeOfOps) -> usize {
+        2
     }
 }
 

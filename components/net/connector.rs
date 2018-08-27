@@ -3,52 +3,51 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use hosts::replace_host;
-use hyper::client::Pool;
+//use hyper::client::Pool;
 use hyper::error::{Result as HyperResult, Error as HyperError};
-use hyper::net::{NetworkConnector, HttpsStream, HttpStream, SslClient};
-use hyper_openssl::OpensslClient;
+//use hyper::net::{NetworkConnector, HttpsStream, HttpStream, SslClient};
+use hyper::{Connect, ConnectFuture, HttpConnector as HyperHttpConnector};
+use hyper_openssl::{HttpsConnector, OpensslClient};
 use openssl::ssl::{SSL_OP_NO_COMPRESSION, SSL_OP_NO_SSLV2, SSL_OP_NO_SSLV3};
 use openssl::ssl::{SslConnector, SslConnectorBuilder, SslMethod};
 use openssl::x509;
 use std::io;
-use std::net::TcpStream;
+use std::net::{IpAddr, SocketAddr, TcpStream};
+use std::error::Error;
+use tokio::reactor::Handle;
 
-pub struct HttpsConnector {
-    ssl: OpensslClient,
+pub struct HttpConnector {
+    inner: HyperHttpConnector
 }
 
-impl HttpsConnector {
-    fn new(ssl: OpensslClient) -> HttpsConnector {
+impl HttpConnector {
+    fn new() -> HttpsConnector {
         HttpsConnector {
-            ssl: ssl,
+            inner: HyperHttpConnector::new(4) // TODO
         }
     }
 }
 
-impl NetworkConnector for HttpsConnector {
-    type Stream = HttpsStream<<OpensslClient as SslClient>::Stream>;
+impl Connect for HttpConnector {
+    type Transport = HyperHttpConnector::Transport;
+    type Error = HyperHttpConnector::Error;
+    type Future = HyperHttpConnector::Future;
 
-    fn connect(&self, host: &str, port: u16, scheme: &str) -> HyperResult<Self::Stream> {
-        if scheme != "http" && scheme != "https" {
+    fn connect(addr: &SocketAddr, local_addr: &Option<IpAddr>, handle: &Option<Handle>, reuse_address: bool) -> Self::Future {
+        /*
+         if scheme != "http" && scheme != "https" {
             return Err(HyperError::Io(io::Error::new(io::ErrorKind::InvalidInput,
                                                      "Invalid scheme for Http")));
         }
+        */
 
         // Perform host replacement when making the actual TCP connection.
-        let addr = &(&*replace_host(host), port);
-        let stream = HttpStream(TcpStream::connect(addr)?);
-
-        if scheme == "http" {
-            Ok(HttpsStream::Http(stream))
-        } else {
-            // Do not perform host replacement on the host that is used
-            // for verifying any SSL certificate encountered.
-            self.ssl.wrap_client(stream, host).map(HttpsStream::Https)
-        }
+        let addr = &(&*replace_host(addr.host()), addr.port());
+        HyperHttpConnector::connect(addr, local_addr, handle, reuse_address)
     }
 }
 
-pub type Connector = HttpsConnector;
+pub type Connector = HttpsConnector<HttpConnector>;
 
 pub fn create_ssl_connector(certs: &str) -> SslConnector {
     // certs include multiple certificates. We could add all of them at once,
@@ -87,9 +86,8 @@ pub fn create_ssl_client(certs: &str) -> OpensslClient {
     OpensslClient::from(ssl_connector)
 }
 
-pub fn create_http_connector(ssl_client: OpensslClient) -> Pool<Connector> {
-    let https_connector = HttpsConnector::new(ssl_client);
-    Pool::with_connector(Default::default(), https_connector)
+pub fn create_http_connector(ssl_client: OpensslClient) -> Connector {
+    HttpsConnector::new(ssl_client)
 }
 
 // The basic logic here is to prefer ciphers with ECDSA certificates, Forward

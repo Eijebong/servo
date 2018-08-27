@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+use base64;
 use brotli::Decompressor;
 use connector::{Connector, create_http_connector};
 use cookie;
@@ -14,21 +15,8 @@ use fetch::methods::{is_cors_safelisted_request_header, is_cors_safelisted_metho
 use flate2::read::{DeflateDecoder, GzDecoder};
 use hsts::HstsList;
 use http_cache::HttpCache;
-use hyper::Error as HttpError;
-use hyper::LanguageTag;
-use hyper::client::{Pool, Request as HyperRequest, Response as HyperResponse};
-use hyper::header::{Accept, AccessControlAllowCredentials, AccessControlAllowHeaders};
-use hyper::header::{AccessControlAllowMethods, AccessControlAllowOrigin};
-use hyper::header::{AccessControlMaxAge, AccessControlRequestHeaders};
-use hyper::header::{AccessControlRequestMethod, AcceptEncoding, AcceptLanguage};
-use hyper::header::{Authorization, Basic, CacheControl, CacheDirective};
-use hyper::header::{ContentEncoding, ContentLength, Encoding, Header, Headers};
-use hyper::header::{Host, HttpDate, Origin as HyperOrigin, IfMatch, IfRange};
-use hyper::header::{IfUnmodifiedSince, IfModifiedSince, IfNoneMatch, Location};
-use hyper::header::{Pragma, Quality, QualityItem, Referer, SetCookie};
-use hyper::header::{UserAgent, q, qitem};
-use hyper::method::Method;
-use hyper::status::StatusCode;
+use http::{header, HeaderMap};
+use hyper::{Method, StatusCode, Response as HyperResponse};
 use hyper_openssl::OpensslClient;
 use hyper_serde::Serde;
 use log;
@@ -75,7 +63,7 @@ pub struct HttpState {
     pub auth_cache: RwLock<AuthCache>,
     pub history_states: RwLock<HashMap<HistoryStateId, Vec<u8>>>,
     pub ssl_client: OpensslClient,
-    pub connector: Pool<Connector>,
+    pub connector: Connector,
 }
 
 impl HttpState {
@@ -97,8 +85,8 @@ fn precise_time_ms() -> u64 {
 }
 
 // Step 3 of https://fetch.spec.whatwg.org/#concept-fetch.
-pub fn set_default_accept(destination: Destination, headers: &mut Headers) {
-    if headers.has::<Accept>() {
+pub fn set_default_accept(destination: Destination, headers: &mut HeaderMap) {
+    if headers.contains_key(header::ACCEPT) {
         return;
     }
     let value = match destination {
@@ -137,8 +125,8 @@ pub fn set_default_accept(destination: Destination, headers: &mut Headers) {
     headers.set(Accept(value));
 }
 
-fn set_default_accept_encoding(headers: &mut Headers) {
-    if headers.has::<AcceptEncoding>() {
+fn set_default_accept_encoding(headers: &mut HeaderMap) {
+    if headers.contains_key(header::ACCEPT_ENCODING) {
         return
     }
 
@@ -149,8 +137,8 @@ fn set_default_accept_encoding(headers: &mut Headers) {
     ]));
 }
 
-pub fn set_default_accept_language(headers: &mut Headers) {
-    if headers.has::<AcceptLanguage>() {
+pub fn set_default_accept_language(headers: &mut HeaderMap) {
+    if headers.contains_key(header::ACCEPT_LANGUAGE) {
         return;
     }
 
@@ -210,12 +198,12 @@ fn strip_url(mut referrer_url: ServoUrl, origin_only: bool) -> Option<ServoUrl> 
 
 /// <https://w3c.github.io/webappsec-referrer-policy/#determine-requests-referrer>
 /// Steps 4-6.
-pub fn determine_request_referrer(headers: &mut Headers,
+pub fn determine_request_referrer(headers: &mut HeaderMap,
                                   referrer_policy: ReferrerPolicy,
                                   referrer_source: ServoUrl,
                                   current_url: ServoUrl)
                                   -> Option<ServoUrl> {
-    assert!(!headers.has::<Referer>());
+    assert!(!headers.contains_key(header::REFERER));
     // FIXME(#14505): this does not seem to be the correct way of checking for
     //                same-origin requests.
     let cross_origin = referrer_source.origin() != current_url.origin();
@@ -233,7 +221,7 @@ pub fn determine_request_referrer(headers: &mut Headers,
     }
 }
 
-pub fn set_request_cookies(url: &ServoUrl, headers: &mut Headers, cookie_jar: &RwLock<CookieStorage>) {
+pub fn set_request_cookies(url: &ServoUrl, headers: &mut HeaderMap, cookie_jar: &RwLock<CookieStorage>) {
     let mut cookie_jar = cookie_jar.write().unwrap();
     if let Some(cookie_list) = cookie_jar.cookies_for_url(url, CookieSource::HTTP) {
         let mut v = Vec::new();
@@ -244,7 +232,7 @@ pub fn set_request_cookies(url: &ServoUrl, headers: &mut Headers, cookie_jar: &R
 
 fn set_cookie_for_url(cookie_jar: &RwLock<CookieStorage>,
                       request: &ServoUrl,
-                      cookie_val: String) {
+                      cookie_val: &str) {
     let mut cookie_jar = cookie_jar.write().unwrap();
     let source = CookieSource::HTTP;
     let header = Header::parse_header(&[cookie_val.into_bytes()]);
@@ -320,7 +308,7 @@ enum Decoder {
 fn prepare_devtools_request(request_id: String,
                             url: ServoUrl,
                             method: Method,
-                            headers: Headers,
+                            headers: HeaderMap,
                             body: Option<Vec<u8>>,
                             pipeline_id: PipelineId,
                             now: Tm,
@@ -351,7 +339,7 @@ fn send_request_to_devtools(msg: ChromeToDevtoolsControlMsg,
 
 fn send_response_to_devtools(devtools_chan: &Sender<DevtoolsControlMsg>,
                              request_id: String,
-                             headers: Option<Headers>,
+                             headers: Option<HeaderMap>,
                              status: Option<(u16, Vec<u8>)>,
                              pipeline_id: PipelineId) {
     let response = DevtoolsHttpResponse { headers: headers, status: status, body: None, pipeline_id: pipeline_id };
@@ -371,10 +359,10 @@ fn auth_from_cache(auth_cache: &RwLock<AuthCache>, origin: &ImmutableOrigin) -> 
     }
 }
 
-fn obtain_response(connector: &Pool<Connector>,
+fn obtain_response(connector: &Connector,
                    url: &ServoUrl,
                    method: &Method,
-                   request_headers: &Headers,
+                   request_headers: &HeaderMap,
                    data: &Option<Vec<u8>>,
                    load_data_method: &Method,
                    pipeline_id: &Option<PipelineId>,
@@ -581,7 +569,7 @@ pub fn http_fetch(request: &mut Request,
     // Step 5
     if response.actual_response().status.map_or(false, is_redirect_status) {
         // Substep 1.
-        if response.actual_response().status.map_or(true, |s| s != StatusCode::SeeOther) {
+        if response.actual_response().status.map_or(true, |s| s != StatusCode::SEE_OTHER) {
             // TODO: send RST_STREAM frame
         }
 
@@ -664,7 +652,7 @@ pub fn http_redirect_fetch(request: &mut Request,
     }
 
     // Step 9
-    if response.actual_response().status.map_or(true, |s| s != StatusCode::SeeOther) &&
+    if response.actual_response().status.map_or(true, |s| s != StatusCode::SEE_OTHER) &&
        request.body.as_ref().map_or(false, |b| b.is_empty()) {
         return Response::network_error(NetworkError::Internal("Request body is not done".into()));
     }
@@ -676,8 +664,8 @@ pub fn http_redirect_fetch(request: &mut Request,
 
     // Step 11
     if response.actual_response().status.map_or(false, |code|
-        ((code == StatusCode::MovedPermanently || code == StatusCode::Found) && request.method == Method::Post) ||
-        (code == StatusCode::SeeOther && request.method != Method::Head)) {
+        ((code == StatusCode::MOVED_PERMANENTLY || code == StatusCode::FOUND) && request.method == Method::Post) ||
+        (code == StatusCode::SEE_OTHER && request.method != Method::Head)) {
         request.method = Method::Get;
         request.body = None;
     }
@@ -699,12 +687,11 @@ pub fn http_redirect_fetch(request: &mut Request,
     main_fetch(request, cache, cors_flag, recursive_flag, target, done_chan, context)
 }
 
-fn try_immutable_origin_to_hyper_origin(url_origin: &ImmutableOrigin) -> Option<HyperOrigin> {
+fn immutable_origin_to_header(url_origin: &ImmutableOrigin) -> String {
     match *url_origin {
         // TODO (servo/servo#15569) Set "Origin: null" when hyper supports it
-        ImmutableOrigin::Opaque(_) => None,
-        ImmutableOrigin::Tuple(ref scheme, ref host, ref port) =>
-            Some(HyperOrigin::new(scheme.clone(), host.to_string(), Some(port.clone())))
+        ImmutableOrigin::Opaque(_) => "null".to_string(),
+        ImmutableOrigin::Tuple(ref scheme, ref host, _) => format!("{}//{}", scheme, host)
     }
 }
 
@@ -782,7 +769,7 @@ fn http_network_or_cache_fetch(request: &mut Request,
     }
 
     // Step 12
-    if !http_request.headers.has::<UserAgent>() {
+    if !http_request.headers.contains_key(header::USER_AGENT) {
         let user_agent = context.user_agent.clone().into_owned();
         http_request.headers.set(UserAgent(user_agent));
     }
@@ -794,20 +781,20 @@ fn http_network_or_cache_fetch(request: &mut Request,
         },
 
         // Step 14
-        CacheMode::NoCache if !http_request.headers.has::<CacheControl>() => {
             http_request.headers.set(CacheControl(vec![CacheDirective::MaxAge(0)]));
+        CacheMode::NoCache if !http_request.headers.contains_key(header::CACHE_CONTROL) => {
         },
 
         // Step 15
         CacheMode::Reload | CacheMode::NoStore => {
             // Substep 1
-            if !http_request.headers.has::<Pragma>() {
+            if !http_request.headers.contains_key(header::PRAGMA) {
                 http_request.headers.set(Pragma::NoCache);
             }
 
             // Substep 2
-            if !http_request.headers.has::<CacheControl>() {
                 http_request.headers.set(CacheControl(vec![CacheDirective::NoCache]));
+            if !http_request.headers.contains_key(header::CACHE_CONTROL) {
             }
         },
 
@@ -835,7 +822,7 @@ fn http_network_or_cache_fetch(request: &mut Request,
                             &mut http_request.headers,
                             &context.state.cookie_jar);
         // Substep 2
-        if !http_request.headers.has::<Authorization<String>>() {
+        if !http_request.headers.contains_key(header::AUTHORIZATION) {
             // Substep 3
             let mut authorization_value = None;
 
@@ -952,7 +939,7 @@ fn http_network_or_cache_fetch(request: &mut Request,
             }
         }
         // Substep 4
-        if revalidating_flag && forward_response.status.map_or(false, |s| s == StatusCode::NotModified) {
+        if revalidating_flag && forward_response.status.map_or(false, |s| s == StatusCode::NOT_MODIFIED) {
             if let Ok(mut http_cache) = context.state.http_cache.write() {
                 response = http_cache.refresh(&http_request, forward_response.clone(), done_chan);
                 wait_for_cached_response(done_chan, &mut response);
@@ -976,7 +963,7 @@ fn http_network_or_cache_fetch(request: &mut Request,
 
     // Step 23
     // FIXME: Figure out what to do with request window objects
-    if let (Some(StatusCode::Unauthorized), false, true) = (response.status, cors_flag, credentials_flag) {
+    if let (Some(StatusCode::UNAUTHORIZED), false, true) = (response.status, cors_flag, credentials_flag) {
         // Substep 1
         // TODO: Spec says requires testing on multiple WWW-Authenticate headers
 
@@ -1002,7 +989,7 @@ fn http_network_or_cache_fetch(request: &mut Request,
     }
 
     // Step 24
-    if let Some(StatusCode::ProxyAuthenticationRequired) = response.status {
+    if let Some(StatusCode::PROXY_AUTHENTICATION_REQUIRED) = response.status {
         // Step 1
         if request_has_no_window {
             return Response::network_error(NetworkError::Internal("Can't find Window object".into()));
@@ -1243,7 +1230,7 @@ fn cors_preflight_fetch(request: &Request,
     let mut headers = request.headers
         .iter()
         .filter(|view| !is_cors_safelisted_request_header(view))
-        .map(|view| UniCase(view.name().to_ascii_lowercase().to_owned()))
+        .map(|view| UniCase::new(view.name().to_ascii_lowercase().to_owned()))
         .collect::<Vec<UniCase<String>>>();
     headers.sort();
 
@@ -1305,7 +1292,7 @@ fn cors_preflight_fetch(request: &Request,
         // Substep 8
         if request.headers.iter().any(
             |header| header.name() == "authorization" &&
-                     header_names.iter().all(|hn| *hn != UniCase(header.name()))) {
+                     header_names.iter().all(|hn| *hn != UniCase::new(header.name()))) {
             return Response::network_error(NetworkError::Internal("CORS authorization check failed".into()));
         }
 
@@ -1313,7 +1300,7 @@ fn cors_preflight_fetch(request: &Request,
         debug!("CORS check: Allowed headers: {:?}, current headers: {:?}", header_names, request.headers);
         let set: HashSet<&UniCase<String>> = HashSet::from_iter(header_names.iter());
         if request.headers.iter().any(
-            |ref hv| !set.contains(&UniCase(hv.name().to_owned())) && !is_cors_safelisted_request_header(hv)) {
+            |ref hv| !set.contains(&UniCase::new(hv.name().to_owned())) && !is_cors_safelisted_request_header(hv)) {
             return Response::network_error(NetworkError::Internal("CORS headers check failed".into()));
         }
 
@@ -1390,20 +1377,20 @@ fn has_credentials(url: &ServoUrl) -> bool {
     !url.username().is_empty() || url.password().is_some()
 }
 
-fn is_no_store_cache(headers: &Headers) -> bool {
-    headers.has::<IfModifiedSince>() | headers.has::<IfNoneMatch>() |
-    headers.has::<IfUnmodifiedSince>() | headers.has::<IfMatch>() |
-    headers.has::<IfRange>()
+fn is_no_store_cache(headers: &HeaderMap) -> bool {
+    headers.contains_key(header::IF_MODIFIED_SINCE) | headers.contains_key(header::IF_NONE_MATCH) |
+    headers.contains_key(header::IF_UNMODIFIED_SINCE) | headers.contains_key(header::IF_MATCH) |
+    headers.contains_key(header::IF_RANGE)
 }
 
 /// <https://fetch.spec.whatwg.org/#redirect-status>
 pub fn is_redirect_status(status: StatusCode) -> bool {
     match status {
-        StatusCode::MovedPermanently |
-        StatusCode::Found |
-        StatusCode::SeeOther |
-        StatusCode::TemporaryRedirect |
-        StatusCode::PermanentRedirect => true,
+        StatusCode::MOVED_PERMANENTLY |
+        StatusCode::FOUND |
+        StatusCode::SEE_OTHER |
+        StatusCode::TEMPORARY_REDIRECT |
+        StatusCode::PERMANENT_REDIRECT => true,
         _ => false,
     }
 }

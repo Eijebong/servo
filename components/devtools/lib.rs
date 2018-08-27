@@ -14,6 +14,7 @@
 #![deny(unsafe_code)]
 
 extern crate devtools_traits;
+extern crate http;
 extern crate hyper;
 extern crate ipc_channel;
 #[macro_use]

@@ -83,8 +83,8 @@ fn cookie_msg_to_cookie(cookie: cookie_rs::Cookie) -> Cookie {
             Some(time) => Nullable::Value(Date::new(time.to_timespec().sec as u64)),
             None => Nullable::Null
         },
-        secure: cookie.secure(),
-        httpOnly: cookie.http_only(),
+        secure: cookie.secure().unwrap_or(false),
+        httpOnly: cookie.http_only().unwrap_or(false),
     }
 }
 

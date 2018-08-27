@@ -7,6 +7,7 @@
 
 extern crate cookie as cookie_rs;
 extern crate embedder_traits;
+extern crate http;
 extern crate hyper;
 extern crate hyper_serde;
 extern crate image as piston_image;
@@ -15,6 +16,7 @@ extern crate ipc_channel;
 #[macro_use] extern crate log;
 #[macro_use] extern crate malloc_size_of;
 #[macro_use] extern crate malloc_size_of_derive;
+extern crate mime;
 extern crate msg;
 extern crate num_traits;
 #[macro_use] extern crate serde;
@@ -26,14 +28,14 @@ extern crate webrender_api;
 
 use cookie_rs::Cookie;
 use filemanager_thread::FileManagerThreadMsg;
+use http::HeaderMap;
 use hyper::Error as HyperError;
-use hyper::header::{ContentType, Headers, ReferrerPolicy as ReferrerPolicyHeader};
-use hyper::http::RawStatus;
-use hyper::mime::{Attr, Mime};
+use hyper::StatusCode;
 use hyper_serde::Serde;
 use ipc_channel::Error as IpcError;
 use ipc_channel::ipc::{self, IpcReceiver, IpcSender};
 use ipc_channel::router::ROUTER;
+use mime::Mime;
 use msg::constellation_msg::HistoryStateId;
 use request::{Request, RequestInit};
 use response::{HttpsState, Response, ResponseInit};
@@ -79,16 +81,16 @@ pub struct CustomResponse {
     #[ignore_malloc_size_of = "Defined in hyper"]
     #[serde(deserialize_with = "::hyper_serde::deserialize",
             serialize_with = "::hyper_serde::serialize")]
-    pub headers: Headers,
+    pub headers: HeaderMap,
     #[ignore_malloc_size_of = "Defined in hyper"]
     #[serde(deserialize_with = "::hyper_serde::deserialize",
             serialize_with = "::hyper_serde::serialize")]
-    pub raw_status: RawStatus,
+    pub raw_status: (StatusCode, String),
     pub body: Vec<u8>,
 }
 
 impl CustomResponse {
-    pub fn new(headers: Headers, raw_status: RawStatus, body: Vec<u8>) -> CustomResponse {
+    pub fn new(headers: HeaderMap, raw_status: (StatusCode, String), body: Vec<u8>) -> CustomResponse {
         CustomResponse {
             headers: headers,
             raw_status: raw_status,
@@ -124,7 +126,7 @@ pub enum ReferrerPolicy {
     /// "strict-origin-when-cross-origin"
     StrictOriginWhenCrossOrigin,
 }
-
+/*
 impl<'a> From<&'a ReferrerPolicyHeader> for ReferrerPolicy {
     fn from(policy: &'a ReferrerPolicyHeader) -> Self {
         match *policy {
@@ -147,7 +149,7 @@ impl<'a> From<&'a ReferrerPolicyHeader> for ReferrerPolicy {
         }
     }
 }
-
+*/
 #[derive(Deserialize, Serialize)]
 pub enum FetchResponseMsg {
     // todo: should have fields for transmitted/total bytes
@@ -411,14 +413,14 @@ pub struct Metadata {
 
     #[ignore_malloc_size_of = "Defined in hyper"]
     /// MIME type / subtype.
-    pub content_type: Option<Serde<ContentType>>,
+    pub content_type: Option<Serde<Mime>>,
 
     /// Character set.
     pub charset: Option<String>,
 
     #[ignore_malloc_size_of = "Defined in hyper"]
     /// Headers
-    pub headers: Option<Serde<Headers>>,
+    pub headers: Option<Serde<HeaderMap>>,
 
     /// HTTP Status
     pub status: Option<(u16, Vec<u8>)>,
@@ -453,7 +455,7 @@ impl Metadata {
     /// Extract the parts of a Mime that we care about.
     pub fn set_content_type(&mut self, content_type: Option<&Mime>) {
         if self.headers.is_none() {
-            self.headers = Some(Serde(Headers::new()));
+            self.headers = Some(Serde(HeaderMap::new()));
         }
 
         if let Some(mime) = content_type {
@@ -516,6 +518,7 @@ pub enum NetworkError {
     SslValidation(ServoUrl, String),
 }
 
+/*
 impl NetworkError {
     pub fn from_hyper_error(url: &ServoUrl, error: HyperError) -> Self {
         if let HyperError::Ssl(ref ssl_error) = error {
@@ -528,6 +531,7 @@ impl NetworkError {
         NetworkError::SslValidation(url.clone(), error.description().to_owned())
     }
 }
+*/
 
 /// Normalize `slice`, as defined by
 /// [the Fetch Spec](https://fetch.spec.whatwg.org/#concept-header-value-normalize).

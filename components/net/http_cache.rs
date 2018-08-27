@@ -8,11 +8,8 @@
 //! and <http://tools.ietf.org/html/rfc7232>.
 
 use fetch::methods::{Data, DoneChannel};
-use hyper::header;
-use hyper::header::ContentType;
-use hyper::header::Headers;
-use hyper::method::Method;
-use hyper::status::StatusCode;
+use http::{header, HeaderMap};
+use hyper::{Method, StatusCode};
 use hyper_serde::Serde;
 use malloc_size_of::{MallocSizeOf, MallocSizeOfOps, MallocUnconditionalSizeOf, MallocUnconditionalShallowSizeOf};
 use malloc_size_of::Measurable;
@@ -59,7 +56,7 @@ impl CacheKey {
 /// A complete cached resource.
 #[derive(Clone)]
 struct CachedResource {
-    request_headers: Arc<Mutex<Headers>>,
+    request_headers: Arc<Mutex<HeaderMap>>,
     body: Arc<Mutex<ResponseBody>>,
     aborted: Arc<AtomicBool>,
     awaiting_body: Arc<Mutex<Vec<Sender<Data>>>>,
@@ -92,7 +89,7 @@ impl MallocSizeOf for CachedResource {
 #[derive(Clone)]
 struct CachedMetadata {
     /// Headers
-    pub headers: Arc<Mutex<Headers>>,
+    pub headers: Arc<Mutex<HeaderMap>>,
     /// Fields that implement MallocSizeOf
     pub data: Measurable<MeasurableCachedMetadata>
 }
@@ -102,7 +99,7 @@ struct MeasurableCachedMetadata {
     /// Final URL after redirects.
     pub final_url: ServoUrl,
     /// MIME type / subtype.
-    pub content_type: Option<Serde<ContentType>>,
+    pub content_type: Option<String>,
     /// Character set.
     pub charset: Option<String>,
     /// HTTP Status
@@ -308,7 +305,7 @@ fn get_expiry_adjustment_from_request_headers(request: &Request, expires: Durati
 /// Create a CachedResponse from a request and a CachedResource.
 fn create_cached_response(request: &Request,
     cached_resource: &CachedResource,
-    cached_headers: &Headers,
+    cached_headers: &HeaderMap,
     done_chan: &mut DoneChannel)
     -> CachedResponse {
     let mut response = Response::new(cached_resource.data.metadata.data.final_url.clone());
