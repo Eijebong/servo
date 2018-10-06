@@ -17,13 +17,14 @@ use dom::messageevent::MessageEvent;
 use dom_struct::dom_struct;
 use euclid::Length;
 use fetch::FetchCanceller;
-use http::header::HeaderName;
+use headers_ext::ContentType;
+use http::header::{self, HeaderName, HeaderValue};
 use ipc_channel::ipc;
 use ipc_channel::router::ROUTER;
 use js::conversions::ToJSValConvertible;
 use js::jsapi::JSAutoCompartment;
 use js::jsval::UndefinedValue;
-use mime;
+use mime::{self, Mime};
 use net_traits::{CoreResourceMsg, FetchChannels, FetchMetadata};
 use net_traits::{FetchResponseMsg, FetchResponseListener, NetworkError};
 use net_traits::request::{CacheMode, CorsSettings, CredentialsMode};
@@ -37,13 +38,8 @@ use std::str::{Chars, FromStr};
 use std::sync::{Arc, Mutex};
 use task_source::{TaskSource, TaskSourceName};
 use timers::OneshotTimerCallback;
-use typed_headers::{Accept, HeaderMapExt, Quality, QualityItem};
 use utf8;
 
-lazy_static! {
-    static ref LAST_EVENT_ID: HeaderName = HeaderName::from_static("last-event-id");
-}
-header! { (LastEventId, LAST_EVENT_ID) => [String] }
 
 const DEFAULT_RECONNECTION_TIME: u64 = 5000;
 
@@ -343,7 +339,7 @@ impl FetchResponseListener for EventSourceContext {
                 match meta.content_type {
                     None => self.fail_the_connection(),
                     Some(ct) => {
-                        if ct.into_inner().0 == mime::TEXT_EVENT_STREAM {
+                        if <ContentType as Into<Mime>>::into(ct.into_inner()) == mime::TEXT_EVENT_STREAM {
                             self.origin = meta.final_url.origin().unicode_serialization();
                             self.announce_the_connection();
                         } else {
@@ -506,7 +502,8 @@ impl EventSource {
             ..RequestInit::default()
         };
         // Step 10
-        request.headers.typed_insert(&Accept(vec![QualityItem::new(mime::TEXT_EVENT_STREAM, Quality::from_u16(1000))]));
+        // TODO(eijebong): Replace once typed headers allow it
+        request.headers.insert(header::ACCEPT, HeaderValue::from_static("text/event-stream"));
         // Step 11
         request.cache_mode = CacheMode::NoStore;
         // Step 12
@@ -616,7 +613,9 @@ impl EventSourceTimeoutCallback {
         let mut request = event_source.request();
         // Step 5.3
         if !event_source.last_event_id.borrow().is_empty() {
-            request.headers.typed_insert(&LastEventId(String::from(event_source.last_event_id.borrow().clone())));
+            //TODO(eijebong): Change this once typed header support custom values
+            request.headers.insert(HeaderName::from_static("last-event-id"),
+                HeaderValue::from_str(&String::from(event_source.last_event_id.borrow().clone())).unwrap());
         }
         // Step 5.4
         global

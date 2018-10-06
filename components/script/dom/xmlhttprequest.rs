@@ -39,6 +39,8 @@ use dom_struct::dom_struct;
 use encoding_rs::{Encoding, UTF_8};
 use euclid::Length;
 use fetch::FetchCanceller;
+use headers_core::HeaderMapExt;
+use headers_ext::{ContentLength, ContentType};
 use html5ever::serialize;
 use html5ever::serialize::SerializeOpts;
 use http::header::{self, HeaderMap, HeaderName, HeaderValue};
@@ -73,7 +75,6 @@ use task_source::TaskSourceName;
 use task_source::networking::NetworkingTaskSource;
 use time;
 use timers::{OneshotTimerCallback, OneshotTimerHandle};
-use typed_headers::{ContentLength, ContentType, HeaderMapExt};
 use url::Position;
 
 #[derive(Clone, Copy, Debug, JSTraceable, MallocSizeOf, PartialEq)]
@@ -649,10 +650,10 @@ impl XMLHttpRequestMethods for XMLHttpRequest {
                 }
 
                 if !content_type_set {
-                    let ct = request.headers.typed_get::<ContentType>().unwrap_or(None);
+                    let ct = request.headers.typed_get::<ContentType>();
                     if let Some(ct) = ct {
                         if let Some(encoding) = encoding {
-                            let mime = ct.0;
+                            let mime: Mime = ct.into();
                             for param in mime.params() {
                                 if param.0 == mime::CHARSET {
                                     if !param.1.as_str_repr().eq_ignore_ascii_case(encoding) {
@@ -674,8 +675,8 @@ impl XMLHttpRequestMethods for XMLHttpRequest {
                                                         .collect::<Vec<String>>()
                                                         .join("; ")
                                             );
-                                        let new_mime = new_mime.parse().unwrap();
-                                        request.headers.typed_insert(&ContentType(new_mime))
+                                        let new_mime: Mime = new_mime.parse().unwrap();
+                                        request.headers.typed_insert(ContentType::from(new_mime))
                                     }
                                 }
                             }
@@ -1158,7 +1159,7 @@ impl XMLHttpRequest {
 
     fn dispatch_response_progress_event(&self, type_: Atom) {
         let len = self.response.borrow().len() as u64;
-        let total = self.response_headers.borrow().typed_get::<ContentLength>().unwrap_or(None).map(|v| v.0);
+        let total = self.response_headers.borrow().typed_get::<ContentLength>().map(|v| v.0);
         self.dispatch_progress_event(false, type_, len, total);
     }
 
@@ -1379,11 +1380,10 @@ impl XMLHttpRequest {
 
     fn filter_response_headers(&self) -> HeaderMap {
         // https://fetch.spec.whatwg.org/#concept-response-header-list
-        use http::header::HeaderName;
-        use typed_headers::{HeaderMapExt, SetCookie};
+        use http::header::{self, HeaderName};
 
         let mut headers = self.response_headers.borrow().clone();
-        let _ = headers.typed_remove::<SetCookie>();
+        let _ = headers.remove(header::SET_COOKIE);
         headers.remove(HeaderName::from_static("set-cookie2"));
         // XXXManishearth additional CORS filtering goes here
         headers
@@ -1437,8 +1437,9 @@ impl XMLHttpRequest {
         if self.override_charset.borrow().is_some() {
             self.override_charset.borrow().clone()
         } else {
-            match self.response_headers.borrow().typed_get().unwrap_or(None) {
-                Some(ContentType(ref mime)) => {
+            match self.response_headers.borrow().typed_get::<ContentType>() {
+                Some(ct) => {
+                    let mime: Mime = ct.into();
                     let value = mime.get_param(mime::CHARSET);
                     value.and_then(|value|{
                         Encoding::for_label(value.as_str_repr().as_bytes())
@@ -1453,8 +1454,8 @@ impl XMLHttpRequest {
         if self.override_mime_type.borrow().is_some() {
             self.override_mime_type.borrow().clone()
         } else {
-            match self.response_headers.borrow().typed_get().unwrap_or(None) {
-                Some(ContentType(ref mime)) => { Some(mime.clone()) },
+            match self.response_headers.borrow().typed_get::<ContentType>() {
+                Some(ct) => { Some(ct.into()) },
                 None => { None }
             }
         }

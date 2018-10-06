@@ -3,6 +3,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use fetch;
+use headers_ext::ContentType;
+use headers_core::HeaderMapExt;
 use hyper_serde::Serde;
 use mime;
 use net_traits::{FetchMetadata, FilteredMetadata, NetworkError};
@@ -10,7 +12,6 @@ use net_traits::request::{Origin, Request};
 use net_traits::response::ResponseBody;
 use servo_url::ServoUrl;
 use std::ops::Deref;
-use typed_headers::{ContentType, HeaderMapExt};
 
 #[cfg(test)]
 fn assert_parse(url:          &'static str,

@@ -7,6 +7,8 @@
 
 extern crate cookie as cookie_rs;
 extern crate embedder_traits;
+extern crate headers_core;
+extern crate headers_ext;
 extern crate http;
 extern crate hyper;
 extern crate hyper_serde;
@@ -22,13 +24,14 @@ extern crate num_traits;
 #[macro_use] extern crate serde;
 extern crate servo_arc;
 extern crate servo_url;
-extern crate typed_headers;
-extern crate url;
+#[macro_use] extern crate url;
 extern crate uuid;
 extern crate webrender_api;
 
 use cookie_rs::Cookie;
 use filemanager_thread::FileManagerThreadMsg;
+use headers_core::HeaderMapExt;
+use headers_ext::{ContentType, ReferrerPolicy as ReferrerPolicyHeader};
 use http::{Error as HttpError, HeaderMap};
 use hyper::Error as HyperError;
 use hyper::StatusCode;
@@ -43,14 +46,14 @@ use response::{HttpsState, Response, ResponseInit};
 use servo_url::ServoUrl;
 use std::error::Error;
 use storage_thread::StorageThreadMsg;
-use typed_headers::{HeaderMapExt, ContentType};
-use typed_headers::ReferrerPolicy as ReferrerPolicyHeader;
+use url::percent_encoding;
 
 pub mod blob_url_store;
 pub mod filemanager_thread;
 pub mod image_cache;
 pub mod net_error_list;
 pub mod pub_domains;
+pub mod quality;
 pub mod request;
 pub mod response;
 pub mod storage_thread;
@@ -133,21 +136,21 @@ pub enum ReferrerPolicy {
 impl From<ReferrerPolicyHeader> for ReferrerPolicy {
     fn from(policy: ReferrerPolicyHeader) -> Self {
         match policy {
-            ReferrerPolicyHeader::NoReferrer =>
+            ReferrerPolicyHeader::NO_REFERRER =>
                 ReferrerPolicy::NoReferrer,
-            ReferrerPolicyHeader::NoReferrerWhenDowngrade =>
+            ReferrerPolicyHeader::NO_REFERRER_WHEN_DOWNGRADE =>
                 ReferrerPolicy::NoReferrerWhenDowngrade,
-            ReferrerPolicyHeader::SameOrigin =>
+            ReferrerPolicyHeader::SAME_ORIGIN =>
                 ReferrerPolicy::SameOrigin,
-            ReferrerPolicyHeader::Origin =>
+            ReferrerPolicyHeader::ORIGIN =>
                 ReferrerPolicy::Origin,
-            ReferrerPolicyHeader::OriginWhenCrossOrigin =>
+            ReferrerPolicyHeader::ORIGIN_WHEN_CROSS_ORIGIN =>
                 ReferrerPolicy::OriginWhenCrossOrigin,
-            ReferrerPolicyHeader::UnsafeUrl =>
+            ReferrerPolicyHeader::UNSAFE_URL =>
                 ReferrerPolicy::UnsafeUrl,
-            ReferrerPolicyHeader::StrictOrigin =>
+            ReferrerPolicyHeader::STRICT_ORIGIN =>
                 ReferrerPolicy::StrictOrigin,
-            ReferrerPolicyHeader::StrictOriginWhenCrossOrigin =>
+            ReferrerPolicyHeader::STRICT_ORIGIN_WHEN_CROSS_ORIGIN =>
                 ReferrerPolicy::StrictOriginWhenCrossOrigin,
         }
     }
@@ -462,8 +465,8 @@ impl Metadata {
         }
 
         if let Some(mime) = content_type {
-            self.headers.as_mut().unwrap().typed_insert(&ContentType(mime.clone()));
-            self.content_type = Some(Serde(ContentType(mime.clone())));
+            self.headers.as_mut().unwrap().typed_insert(ContentType::from(mime.clone()));
+            self.content_type = Some(Serde(ContentType::from(mime.clone())));
             for (name, value) in mime.params() {
                 if mime::CHARSET == name {
                     self.charset = Some(value.to_string());
@@ -557,3 +560,17 @@ pub fn trim_http_whitespace(mut slice: &[u8]) -> &[u8] {
 
     slice
 }
+
+pub fn http_percent_encode(bytes: &[u8]) -> String {
+    define_encode_set! {
+        // This encode set is used for HTTP header values and is defined at
+        // https://tools.ietf.org/html/rfc5987#section-3.2
+        pub HTTP_VALUE = [percent_encoding::SIMPLE_ENCODE_SET] | {
+            ' ', '"', '%', '\'', '(', ')', '*', ',', '/', ':', ';', '<', '-', '>', '?',
+            '[', '\\', ']', '{', '}'
+        }
+    }
+
+    url::percent_encoding::percent_encode(bytes, HTTP_VALUE).to_string()
+}
+

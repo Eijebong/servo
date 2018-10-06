@@ -8,12 +8,17 @@ use devtools_traits::HttpRequest as DevtoolsHttpRequest;
 use devtools_traits::HttpResponse as DevtoolsHttpResponse;
 use fetch_with_context;
 use fetch_with_cors_cache;
+use headers_core::HeaderMapExt;
+use headers_ext::{AccessControlAllowCredentials, AccessControlAllowHeaders, AccessControlAllowOrigin};
+use headers_ext::{AccessControlAllowMethods, AccessControlMaxAge};
+use headers_ext::{CacheControl, ContentCoding, ContentLength, ContentType, Expires, LastModified};
+use headers_ext::{Location, Pragma, Quality, QualityItem, SetCookie, UserAgent};
+use headers_ext::{Host, HttpDate, Referer as HyperReferer};
 use http::{Method, StatusCode};
 use http::header::{self, HeaderMap, HeaderName, HeaderValue};
 use http_loader::{expect_devtools_http_request, expect_devtools_http_response};
 use hyper::{Request as HyperRequest, Response as HyperResponse};
 use hyper::body::Body;
-use language_tags::LanguageTag;
 use mime::{self, Mime};
 use msg::constellation_msg::TEST_PIPELINE_ID;
 use net::connector::create_ssl_connector_builder;
@@ -35,11 +40,6 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use time::Duration;
-use typed_headers::{Accept, AccessControlAllowCredentials, AccessControlAllowHeaders, AccessControlAllowOrigin};
-use typed_headers::{AcceptEncoding, AcceptLanguage, AccessControlAllowMethods, AccessControlMaxAge};
-use typed_headers::{CacheControl, ContentCoding, ContentLength, ContentType, Expires, LastModified};
-use typed_headers::{HeaderMapExt, Location, Pragma, Quality, QualityItem, SetCookie, UserAgent};
-use typed_headers::{Host, HttpDate, Referer as HyperReferer};
 
 // TODO write a struct that impls Handler for storing test values
 
@@ -205,11 +205,11 @@ fn test_cors_preflight_fetch() {
             assert!(request.headers().contains_key(header::ACCESS_CONTROL_REQUEST_METHOD));
             assert!(!request.headers().contains_key(header::ACCESS_CONTROL_REQUEST_HEADERS));
             assert!(!request.headers().typed_get::<HyperReferer>().unwrap().unwrap().contains("a.html"));
-            response.headers_mut().typed_insert(&AccessControlAllowOrigin::Any);
-            response.headers_mut().typed_insert(&AccessControlAllowCredentials);
-            response.headers_mut().typed_insert(&AccessControlAllowMethods(vec![Method::GET]));
+            response.headers_mut().typed_insert(AccessControlAllowOrigin::Any);
+            response.headers_mut().typed_insert(AccessControlAllowCredentials);
+            response.headers_mut().typed_insert(AccessControlAllowMethods(vec![Method::GET]));
         } else {
-            response.headers_mut().typed_insert(&AccessControlAllowOrigin::Any);
+            response.headers_mut().typed_insert(AccessControlAllowOrigin::Any);
             *response.body_mut() = ACK.to_vec().into();
         }
     };
@@ -243,12 +243,12 @@ fn test_cors_preflight_cache_fetch() {
         if request.method() == Method::OPTIONS && state.clone().fetch_add(1, Ordering::SeqCst) == 0 {
             assert!(request.headers().contains_key(header::ACCESS_CONTROL_REQUEST_METHOD));
             assert!(!request.headers().contains_key(header::ACCESS_CONTROL_REQUEST_HEADERS));
-            response.headers_mut().typed_insert(&AccessControlAllowOrigin::Any);
-            response.headers_mut().typed_insert(&AccessControlAllowCredentials);
-            response.headers_mut().typed_insert(&AccessControlAllowMethods(vec![Method::GET]));
-            response.headers_mut().typed_insert(&AccessControlMaxAge(6000));
+            response.headers_mut().typed_insert(AccessControlAllowOrigin::Any);
+            response.headers_mut().typed_insert(AccessControlAllowCredentials);
+            response.headers_mut().typed_insert(AccessControlAllowMethods(vec![Method::GET]));
+            response.headers_mut().typed_insert(AccessControlMaxAge(6000));
         } else {
-            response.headers_mut().typed_insert(&AccessControlAllowOrigin::Any);
+            response.headers_mut().typed_insert(AccessControlAllowOrigin::Any);
             *response.body_mut() = ACK.to_vec().into();
         }
     };
@@ -293,11 +293,11 @@ fn test_cors_preflight_fetch_network_error() {
         if request.method() == Method::OPTIONS && state.clone().fetch_add(1, Ordering::SeqCst) == 0 {
             assert!(request.headers().contains_key(header::ACCESS_CONTROL_REQUEST_METHOD));
             assert!(!request.headers().contains_key(header::ACCESS_CONTROL_REQUEST_HEADERS));
-            response.headers_mut().typed_insert(&AccessControlAllowOrigin::Any);
-            response.headers_mut().typed_insert(&AccessControlAllowCredentials);
-            response.headers_mut().typed_insert(&AccessControlAllowMethods(vec![Method::GET]));
+            response.headers_mut().typed_insert(AccessControlAllowOrigin::Any);
+            response.headers_mut().typed_insert(AccessControlAllowCredentials);
+            response.headers_mut().typed_insert(AccessControlAllowMethods(vec![Method::GET]));
         } else {
-            response.headers_mut().typed_insert(&AccessControlAllowOrigin::Any);
+            response.headers_mut().typed_insert(AccessControlAllowOrigin::Any);
             *response.body_mut() = ACK.to_vec().into();
         }
     };
@@ -319,7 +319,7 @@ fn test_cors_preflight_fetch_network_error() {
 fn test_fetch_response_is_basic_filtered() {
     static MESSAGE: &'static [u8] = b"";
     let handler = move |_: HyperRequest<Body>, response: &mut HyperResponse<Body>| {
-        response.headers_mut().typed_insert(&SetCookie(vec![]));
+        response.headers_mut().typed_insert(SetCookie(vec![]));
         // this header is obsoleted, so hyper doesn't implement it, but it's still covered by the spec
         response.headers_mut().insert(
             HeaderName::from_static("set-cookie2"),
@@ -350,18 +350,18 @@ fn test_fetch_response_is_cors_filtered() {
     let handler = move |_: HyperRequest<Body>, response: &mut HyperResponse<Body>| {
         // this is mandatory for the Cors Check to pass
         // TODO test using different url encodings with this value ie. punycode
-        response.headers_mut().typed_insert(&AccessControlAllowOrigin::Any);
+        response.headers_mut().typed_insert(AccessControlAllowOrigin::Any);
 
         // these are the headers that should be kept after filtering
-        response.headers_mut().typed_insert(&CacheControl(vec![]));
+        response.headers_mut().typed_insert(CacheControl(vec![]));
         response.headers_mut().insert(header::CONTENT_LANGUAGE, HeaderValue::from_bytes(&vec![]).unwrap());
-        response.headers_mut().typed_insert(&ContentType(mime::TEXT_HTML));
-        response.headers_mut().typed_insert(&Expires(HttpDate(Utc::now() + Duration::days(1))));
-        response.headers_mut().typed_insert(&LastModified(HttpDate(Utc::now())));
-        response.headers_mut().typed_insert(&Pragma::NoCache);
+        response.headers_mut().typed_insert(ContentType(mime::TEXT_HTML));
+        response.headers_mut().typed_insert(Expires(HttpDate(Utc::now() + Duration::days(1))));
+        response.headers_mut().typed_insert(LastModified(HttpDate(Utc::now())));
+        response.headers_mut().typed_insert(Pragma::NoCache);
 
         // these headers should not be kept after filtering, even though they are given a pass
-        response.headers_mut().typed_insert(&SetCookie(vec![]));
+        response.headers_mut().typed_insert(SetCookie(vec![]));
         response.headers_mut().insert(
             HeaderName::from_static("set-cookie2"),
             HeaderValue::from_bytes(&vec![]).unwrap()
@@ -445,7 +445,7 @@ fn test_fetch_response_is_opaque_redirect_filtered() {
         } else {
             *response.status_mut() = StatusCode::FOUND;
             let url = format!("{}", 1);
-            response.headers_mut().typed_insert(&Location(url.to_owned()));
+            response.headers_mut().typed_insert(Location(url.to_owned()));
         }
     };
 
@@ -610,7 +610,7 @@ fn test_fetch_blocked_nosniff() {
 
         let handler = move |_: HyperRequest<Body>, response: &mut HyperResponse<Body>| {
             let mime_header = ContentType(mime.clone());
-            response.headers_mut().typed_insert(&mime_header);
+            response.headers_mut().typed_insert(mime_header);
             assert!(response.headers().contains_key(header::CONTENT_TYPE));
             // Add the nosniff header
             response.headers_mut().insert(HeaderName::from_static(HEADER), HeaderValue::from_bytes(VALUE).unwrap());
@@ -650,7 +650,7 @@ fn setup_server_and_fetch(message: &'static [u8], redirect_cap: u32) -> Response
         } else {
             *response.status_mut() = StatusCode::FOUND;
             let url = format!("{redirects}", redirects = redirects + 1);
-            response.headers_mut().typed_insert(&Location(url.to_owned()));
+            response.headers_mut().typed_insert(Location(url.to_owned()));
         }
     };
 
@@ -710,7 +710,7 @@ fn test_fetch_redirect_updates_method_runner(tx: Sender<bool>, status_code: Stat
 
         if redirects == 0 {
             *response.status_mut() = StatusCode::TEMPORARY_REDIRECT;
-            response.headers_mut().typed_insert(&Location("1".to_owned()));
+            response.headers_mut().typed_insert(Location("1".to_owned()));
 
         } else if redirects == 1 {
             // this makes sure that the request method does't change from the wrong status code
@@ -718,7 +718,7 @@ fn test_fetch_redirect_updates_method_runner(tx: Sender<bool>, status_code: Stat
                 test_pass = false;
             }
             *response.status_mut() = status_code;
-            response.headers_mut().typed_insert(&Location("2".to_owned()));
+            response.headers_mut().typed_insert(Location("2".to_owned()));
 
         } else if request.method() != Method::GET {
             test_pass = false;
@@ -850,7 +850,7 @@ fn test_opaque_redirect_filtered_fetch_async_returns_complete_response() {
         } else {
             *response.status_mut() = StatusCode::FOUND;
             let url = format!("{}", 1);
-            response.headers_mut().typed_insert(&Location(url.to_owned()));
+            response.headers_mut().typed_insert(Location(url.to_owned()));
         }
     };
 
@@ -894,28 +894,14 @@ fn test_fetch_with_devtools() {
     //Creating default headers for request
     let mut headers = HeaderMap::new();
 
-    headers.typed_insert(&AcceptEncoding(vec![
-                                   QualityItem::new(ContentCoding::GZIP, Quality::from_u16(1000)),
-                                   QualityItem::new(ContentCoding::DEFLATE, Quality::from_u16(1000)),
-                                   QualityItem::new(ContentCoding::BROTLI, Quality::from_u16(1000)),
-                                   ]));
+    headers.insert(header::ACCEPT_ENCODING, HeaderValue::from_static("gzip, deflate, br"));
+    headers.typed_insert(Host::new(url.host_str().unwrap(), url.port().to_owned()).unwrap());
 
-    headers.typed_insert(&Host::new(url.host_str().unwrap(), url.port().to_owned()).unwrap());
+    headers.insert(header::ACCEPT, HeaderValue::from_static("*/*"));
 
-    let accept = Accept(vec![QualityItem::new(mime::STAR_STAR, Quality::from_u16(1000))]);
-    headers.typed_insert(&accept);
+    headers.insert(header::ACCEPT_LANGUAGE, HeaderValue::from_static("en-US, en;q=0.5"));
 
-    let mut en_us: LanguageTag = Default::default();
-    en_us.language = Some("en".to_owned());
-    en_us.region = Some("US".to_owned());
-    let mut en: LanguageTag = Default::default();
-    en.language = Some("en".to_owned());
-    headers.typed_insert(&AcceptLanguage::new(vec![
-        QualityItem::new(en_us, Quality::from_u16(1000)),
-        QualityItem::new(en, Quality::from_u16(500)),
-    ]).unwrap());
-
-    headers.typed_insert(&UserAgent(DEFAULT_USER_AGENT.to_owned()));
+    headers.typed_insert::<UserAgent>(DEFAULT_USER_AGENT.parse().unwrap());
 
     let httprequest = DevtoolsHttpRequest {
         url: url,
@@ -932,7 +918,7 @@ fn test_fetch_with_devtools() {
 
     let content = "Yay!";
     let mut response_headers = HeaderMap::new();
-    response_headers.typed_insert(&ContentLength(content.len() as u64));
+    response_headers.typed_insert(ContentLength(content.len() as u64));
     devhttpresponse.headers.as_mut().unwrap().remove(header::DATE);
 
     let httpresponse = DevtoolsHttpResponse {

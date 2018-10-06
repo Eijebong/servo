@@ -21,4 +21,5 @@ serde = "1.0"
 serde_json = "1.0"
 servo_channel = {path = "../channel"}
 time = "0.1"
-typed-headers = "0.1"
+headers-ext = { git = "https://github.com/hyperium/headers.git" }
+headers-core = { git = "https://github.com/hyperium/headers.git" }

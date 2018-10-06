@@ -21,7 +21,6 @@ extern crate itertools;
 
 use bluetooth_traits::BluetoothRequest;
 use canvas_traits::webgl::WebGLPipeline;
-use chrono::{DateTime, Local, Utc};
 use devtools;
 use devtools_traits::{DevtoolScriptControlMsg, DevtoolsPageInfo};
 use devtools_traits::{ScriptToDevtoolsControlMsg, WorkerId};
@@ -74,7 +73,7 @@ use js::jsapi::{JSTracer, SetWindowProxyClass};
 use js::jsval::UndefinedValue;
 use metrics::{MAX_TASK_NS, PaintTimeMetrics};
 use microtask::{MicrotaskQueue, Microtask};
-use mime;
+use mime::{self, Mime};
 use msg::constellation_msg::{BrowsingContextId, HistoryStateId, PipelineId};
 use msg::constellation_msg::{PipelineNamespace, TopLevelBrowsingContextId};
 use net_traits::{FetchMetadata, FetchResponseListener, FetchResponseMsg};
@@ -114,6 +113,8 @@ use std::rc::Rc;
 use std::result::Result;
 use std::sync::Arc;
 use std::thread;
+use std::time::SystemTime;
+use time::{at_utc, Timespec};
 use style::thread_state::{self, ThreadState};
 use task_queue::{QueuedTask, QueuedTaskConversion, TaskQueue};
 use task_source::TaskSourceName;
@@ -126,8 +127,9 @@ use task_source::remote_event::RemoteEventTaskSource;
 use task_source::user_interaction::UserInteractionTaskSource;
 use task_source::websocket::WebsocketTaskSource;
 use time::{get_time, precise_time_ns};
-use typed_headers::{ContentType, HttpDate, HeaderMapExt, LastModified};
-use typed_headers::ReferrerPolicy as ReferrerPolicyHeader;
+use headers_core::HeaderMapExt;
+use headers_ext::LastModified;
+use headers_ext::ReferrerPolicy as ReferrerPolicyHeader;
 use url::Position;
 use url::percent_encoding::percent_decode;
 use webdriver_handlers;
@@ -2599,25 +2601,23 @@ impl ScriptThread {
 
         let last_modified = metadata.headers.as_ref().and_then(|headers| {
             headers.typed_get::<LastModified>()
-                .unwrap_or(None)
-                .map(|LastModified(HttpDate(ref tm))| dom_last_modified(tm))
+                .map(|tm| dom_last_modified(&tm.into()))
         });
-
-        let content_type = metadata
-            .content_type
-            .as_ref()
-            .map(|&Serde(ContentType(ref mimetype))| mimetype.clone());
 
         let loader = DocumentLoader::new_with_threads(
             self.resource_threads.clone(),
             Some(final_url.clone()),
         );
 
-        let is_html_document = match metadata.content_type {
-            Some(Serde(ContentType(ref mime))) if mime.type_() == mime::APPLICATION &&
+        let content_type: Option<Mime> = metadata.content_type
+            .map(Serde::into_inner)
+            .map(Into::into);
+
+        let is_html_document = match content_type {
+            Some(ref mime) if mime.type_() == mime::APPLICATION &&
                 mime.suffix() == Some(mime::XML) => IsHTMLDocument::NonHTMLDocument,
 
-            Some(Serde(ContentType(ref mime))) if
+            Some(ref mime) if
                 (mime.type_() == mime::TEXT && mime.subtype() == mime::XML) ||
                 (mime.type_() == mime::APPLICATION && mime.subtype() == mime::XML)
                 => IsHTMLDocument::NonHTMLDocument,
@@ -2632,7 +2632,7 @@ impl ScriptThread {
         let referrer_policy = metadata.headers
                                       .as_ref()
                                       .map(Serde::deref)
-                                      .and_then(|h| h.typed_get::<ReferrerPolicyHeader>().unwrap_or(None))
+                                      .and_then(|h| h.typed_get::<ReferrerPolicyHeader>())
                                       .map(ReferrerPolicy::from);
 
         let document = Document::new(&window,
@@ -3188,6 +3188,13 @@ impl Drop for ScriptThread {
     }
 }
 
-fn dom_last_modified(tm: &DateTime<Utc>) -> String {
-    tm.with_timezone(&Local).format("%m/%d/%Y %H:%M:%S").to_string()
+fn dom_last_modified(tm: &SystemTime) -> String {
+    let tm = tm.duration_since(SystemTime::UNIX_EPOCH).unwrap();
+    let tm = Timespec::new(tm.as_secs() as i64, 0);
+    let tm = at_utc(tm);
+    tm.to_local()
+        .strftime("%m/%d/%Y %H:%M:%S")
+        .unwrap()
+        .to_string()
+
 }

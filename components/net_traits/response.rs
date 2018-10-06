@@ -11,7 +11,8 @@ use servo_arc::Arc;
 use servo_url::ServoUrl;
 use std::sync::Mutex;
 use std::sync::atomic::AtomicBool;
-use typed_headers::{AccessControlExposeHeaders, ContentType, HeaderMapExt};
+use headers_core::HeaderMapExt;
+use headers_ext::{AccessControlExposeHeaders, ContentType};
 
 /// [Response type](https://fetch.spec.whatwg.org/#concept-response-type)
 #[derive(Clone, Debug, Deserialize, MallocSizeOf, PartialEq, Serialize)]
@@ -250,17 +251,16 @@ impl Response {
             },
 
             ResponseType::Cors => {
-                let access = old_headers.typed_get::<AccessControlExposeHeaders>().unwrap_or(None);
-                let allowed_headers = access.as_ref().map(|v| &v[..]).unwrap_or(&[]);
-
                 let headers = old_headers.iter().filter(|(name, _)| {
                     match &*name.as_str().to_ascii_lowercase() {
                         "cache-control" | "content-language" | "content-type" |
                         "expires" | "last-modified" | "pragma" => true,
                         "set-cookie" | "set-cookie2" => false,
                         header => {
-                            let result =
-                                allowed_headers.iter().find(|h| *header == h.as_str().to_ascii_lowercase());
+                            let access = old_headers.typed_get::<AccessControlExposeHeaders>();
+                            let result = access
+                                .map(|v| v.iter().find(|h| *header == h.as_str().to_ascii_lowercase()))
+                                .unwrap_or(None);
                             result.is_some()
                         }
                     }
@@ -291,10 +291,7 @@ impl Response {
     pub fn metadata(&self) -> Result<FetchMetadata, NetworkError> {
         fn init_metadata(response: &Response, url: &ServoUrl) -> Metadata {
             let mut metadata = Metadata::default(url.clone());
-            metadata.set_content_type(match response.headers.typed_get::<ContentType>() {
-                Ok(Some(ContentType(ref mime))) => Some(mime),
-                _ => None,
-            });
+            metadata.set_content_type(response.headers.typed_get::<ContentType>().map(|v| v.into()).as_ref());
             metadata.location_url = response.location_url.clone();
             metadata.headers = Some(Serde(response.headers.clone()));
             metadata.status = response.raw_status.clone();

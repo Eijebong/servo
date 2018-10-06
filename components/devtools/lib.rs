@@ -13,6 +13,8 @@
 #![deny(unsafe_code)]
 
 extern crate devtools_traits;
+extern crate headers_core;
+extern crate headers_ext;
 extern crate http;
 extern crate hyper;
 extern crate ipc_channel;
@@ -24,7 +26,6 @@ extern crate serde;
 extern crate serde_json;
 extern crate servo_channel;
 extern crate time;
-extern crate typed_headers;
 
 use actor::{Actor, ActorRegistry};
 use actors::console::ConsoleActor;

@@ -180,7 +180,7 @@ impl FetchResponseListener for ImageContext {
         // Step 14.5 of https://html.spec.whatwg.org/multipage/#img-environment-changes
         if let Some(metadata) = metadata.as_ref() {
             if let Some(ref content_type) = metadata.content_type {
-                let mime = content_type.clone().into_inner().0;
+                let mime: Mime = content_type.clone().into_inner().into();
                 if mime.type_() == mime::MULTIPART && mime.subtype().as_str() == "x-mixed-replace" {
                     self.aborted.set(true);
                 }

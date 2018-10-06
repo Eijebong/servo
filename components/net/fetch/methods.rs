@@ -7,7 +7,9 @@ use data_loader::decode;
 use devtools_traits::DevtoolsControlMsg;
 use fetch::cors_cache::CorsCache;
 use filemanager_thread::FileManager;
-use http::header::{self, HeaderMap, HeaderName, HeaderValue, ValueIter};
+use headers_core::HeaderMapExt;
+use headers_ext::{AccessControlExposeHeaders, ContentType};
+use http::header::{self, HeaderMap, HeaderName, HeaderValue};
 use http_loader::{HttpState, determine_request_referrer, http_fetch};
 use http_loader::{set_default_accept, set_default_accept_language};
 use hyper::Method;
@@ -30,9 +32,6 @@ use std::sync::{Arc, Mutex};
 use std::sync::atomic::Ordering;
 use std::thread;
 use subresource_integrity::is_response_integrity_valid;
-use typed_headers::{self, AccessControlExposeHeaders, ContentType, Referer as RefererHeader};
-use typed_headers::{Header, HeaderMapExt, ToValues};
-use typed_headers::util::encode_single_value;
 
 lazy_static! {
     static ref X_CONTENT_TYPE_OPTIONS: HeaderName = HeaderName::from_static("x-content-type-options");
@@ -176,11 +175,11 @@ pub fn main_fetch(request: &mut Request,
             Referrer::Client => {
                 // FIXME(#14507): We should never get this value here; it should
                 //                already have been handled in the script thread.
-                request.headers.typed_remove::<RefererHeader>().unwrap();
+                request.headers.remove(header::REFERER);
                 None
             },
             Referrer::ReferrerUrl(url) => {
-                request.headers.typed_remove::<RefererHeader>().unwrap();
+                request.headers.remove(header::REFERER);
                 let current_url = request.current_url().clone();
                 determine_request_referrer(&mut request.headers,
                                            request.referrer_policy.unwrap(),
@@ -272,7 +271,8 @@ pub fn main_fetch(request: &mut Request,
         // Substep 1.
         if request.response_tainting == ResponseTainting::CorsTainting {
             // Subsubstep 1.
-            let header_names = response.headers.typed_get::<AccessControlExposeHeaders>().unwrap_or(None);
+            let header_names: Option<Vec<HeaderName>> = response.headers.typed_get::<AccessControlExposeHeaders>()
+                .map(|v| v.iter().collect());
             match header_names {
                 // Subsubstep 2.
                 Some(ref list) if request.credentials_mode != CredentialsMode::Include => {
@@ -283,7 +283,7 @@ pub fn main_fetch(request: &mut Request,
                 },
                 // Subsubstep 3.
                 Some(list) => {
-                    response.cors_exposed_header_name_list = list.0.iter().map(|h| h.as_str().to_owned()).collect();
+                    response.cors_exposed_header_name_list = list.iter().map(|h| h.as_str().to_owned()).collect();
                 },
                 _ => (),
             }
@@ -466,7 +466,7 @@ fn scheme_fetch(request: &mut Request,
     match url.scheme() {
         "about" if url.path() == "blank" => {
             let mut response = Response::new(url);
-            response.headers.typed_insert(&ContentType(mime::TEXT_HTML_UTF_8));
+            response.headers.typed_insert(ContentType::from(mime::TEXT_HTML_UTF_8));
             *response.body.lock().unwrap() = ResponseBody::Done(vec![]);
             response
         },
@@ -480,7 +480,7 @@ fn scheme_fetch(request: &mut Request,
                 Ok((mime, bytes)) => {
                     let mut response = Response::new(url);
                     *response.body.lock().unwrap() = ResponseBody::Done(bytes);
-                    response.headers.typed_insert(&ContentType(mime));
+                    response.headers.typed_insert(ContentType::from(mime));
                     response
                 },
                 Err(_) => Response::network_error(NetworkError::Internal("Decoding data URL failed".into()))
@@ -496,7 +496,7 @@ fn scheme_fetch(request: &mut Request,
                                 let mime = guess_mime_type(file_path);
 
                                 let mut response = Response::new(url);
-                                response.headers.typed_insert(&ContentType(mime));
+                                response.headers.typed_insert(ContentType::from(mime));
 
                                 let (done_sender, done_receiver) = channel();
                                 *done_chan = Some((done_sender.clone(), done_receiver));
@@ -616,54 +616,15 @@ fn is_null_body_status(status: &Option<(StatusCode, String)>) -> bool {
 
 /// <https://fetch.spec.whatwg.org/#should-response-to-request-be-blocked-due-to-nosniff?>
 pub fn should_be_blocked_due_to_nosniff(destination: Destination, response_headers: &HeaderMap) -> bool {
-    /// <https://fetch.spec.whatwg.org/#x-content-type-options-header>
-    /// This is needed to parse `X-Content-Type-Options` according to spec,
-    /// which requires that we inspect only the first value.
-    ///
-    /// A [unit-like struct](https://doc.rust-lang.org/book/structs.html#unit-like-structs)
-    /// is sufficient since a valid header implies that we use `nosniff`.
-    #[derive(Clone, Copy, Debug)]
-    struct XContentTypeOptions;
-
-    impl Header for XContentTypeOptions {
-        fn name() -> &'static HeaderName {
-            &X_CONTENT_TYPE_OPTIONS
-        }
-
-        /// https://fetch.spec.whatwg.org/#should-response-to-request-be-blocked-due-to-nosniff%3F #2
-        fn from_values(
-            values: &mut ValueIter<HeaderValue>,
-        ) -> Result<Option<XContentTypeOptions>, typed_headers::Error> {
-                let v = if let Some(value) = values.next() {
-                    Ok(value.to_str().ok()
-                    .and_then(|s| if s.trim().eq_ignore_ascii_case("nosniff") {
-                        Some(XContentTypeOptions)
-                    } else {
-                        None
-                    }))
-                } else {
-                    Ok(None)
-                };
-
-                // Empty the iterator. If it's not empty, it'll be considered an error
-                for _ in values {}
-
-                v
-        }
-
-        fn to_values(&self, values: &mut ToValues) {
-            encode_single_value("nosniff", values)
-        }
-    }
-
     // Steps 1-3.
-    if response_headers.typed_get::<XContentTypeOptions>().unwrap_or(None).is_none() {
+    // TODO(eijebong): Replace this once typed headers allow custom ones...
+    if response_headers.get("x-content-type-options").map(|val| val != "nosniff").unwrap_or(false) {
         return false;
     }
 
     // Step 4
     // Note: an invalid MIME type will produce a `None`.
-    let content_type_header = response_headers.typed_get::<ContentType>().unwrap_or(None);
+    let content_type_header = response_headers.typed_get::<ContentType>();
 
     /// <https://html.spec.whatwg.org/multipage/#scriptingLanguages>
     #[inline]
@@ -691,15 +652,17 @@ pub fn should_be_blocked_due_to_nosniff(destination: Destination, response_heade
             .any(|mime| mime.type_() == mime_type.type_() && mime.subtype() == mime_type.subtype())
     }
 
-    // Assumes str::starts_with is equivalent to mime::TopLevel
     match content_type_header {
         // Step 6
-        Some(ContentType(ref mime_type)) if destination.is_script_like()
-            => !is_javascript_mime_type(mime_type),
+        Some(ref ct) if destination.is_script_like()
+            => !is_javascript_mime_type(&ct.clone().into()),
 
         // Step 7
-        Some(ContentType(ref m)) if destination == Destination::Style
-            => m.type_() != mime::TEXT && m.subtype() != mime::CSS,
+        Some(ref ct) if destination == Destination::Style
+            => {
+                let m: mime::Mime = ct.clone().into();
+                m.type_() != mime::TEXT && m.subtype() != mime::CSS
+            },
 
         None if destination == Destination::Style || destination.is_script_like() => true,
         // Step 8
@@ -710,8 +673,8 @@ pub fn should_be_blocked_due_to_nosniff(destination: Destination, response_heade
 /// <https://fetch.spec.whatwg.org/#should-response-to-request-be-blocked-due-to-mime-type?>
 fn should_be_blocked_due_to_mime_type(destination: Destination, response_headers: &HeaderMap) -> bool {
     // Step 1
-    let mime_type = match response_headers.typed_get::<ContentType>().unwrap_or(None) {
-        Some(header) => header,
+    let mime_type: mime::Mime = match response_headers.typed_get::<ContentType>() {
+        Some(header) => header.into(),
         None => return false,
     };
 

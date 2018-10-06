@@ -7,7 +7,9 @@ use cookie::Cookie;
 use embedder_traits::resources::{self, Resource};
 use fetch::methods::should_be_blocked_due_to_bad_port;
 use hosts::replace_host;
-use http::header::{HeaderMap, HeaderName, HeaderValue};
+use headers_ext::Host;
+use http::header::{self, HeaderMap, HeaderName, HeaderValue};
+use http::uri::Authority;
 use http_loader::HttpState;
 use ipc_channel::ipc::{IpcReceiver, IpcSender};
 use net_traits::{CookieSource, MessageData};
@@ -20,7 +22,6 @@ use std::fs;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
-use typed_headers::{HeaderMapExt, Host, SetCookie};
 use url::Url;
 use ws::{CloseCode, Factory, Handler, Handshake, Message, Request, Response as WsResponse, Sender, WebSocket};
 use ws::{Error as WebSocketError, ErrorKind as WebSocketErrorKind, Result as WebSocketResult};
@@ -78,12 +79,11 @@ impl<'a> Handler for Client<'a> {
             headers.insert(name, value);
         }
 
-         if let Some(cookies) = headers.typed_get::<SetCookie>().unwrap_or(None) {
-            let mut jar = self.http_state.cookie_jar.write().unwrap();
-            for cookie in cookies.0.iter() {
-                if let Some(cookie) =
-                    Cookie::from_cookie_string(cookie.clone(), self.resource_url, CookieSource::HTTP)
-                {
+        let mut jar = self.http_state.cookie_jar.write().unwrap();
+        // TODO(eijebong): Replace thise once typed headers settled on a cookie impl
+        for cookie in headers.get_all(header::SET_COOKIE) {
+            if let Ok(s) = cookie.to_str() {
+                if let Some(cookie) = Cookie::from_cookie_string(s.into(), self.resource_url, CookieSource::HTTP) {
                     jar.push(cookie, self.resource_url, CookieSource::HTTP);
                 }
             }
@@ -184,10 +184,11 @@ pub fn init(
         let mut net_url = req_init.url.clone().into_url();
         net_url.set_host(Some(&host)).unwrap();
 
-        let host = Host::new(
-            req_init.url.host_str().unwrap(),
-            req_init.url.port_or_known_default()
-        ).unwrap();
+        let host = Host::from(
+            format!("{}{}", req_init.url.host_str().unwrap(),
+                            req_init.url.port_or_known_default().map(|v| format!(":{}", v)).unwrap_or("".into())
+            ).parse::<Authority>().unwrap()
+        );
 
         let client = Client {
             origin: &req_init.origin.ascii_serialization(),

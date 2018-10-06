@@ -9,6 +9,8 @@
 use actor::{Actor, ActorMessageStatus, ActorRegistry};
 use devtools_traits::HttpRequest as DevtoolsHttpRequest;
 use devtools_traits::HttpResponse as DevtoolsHttpResponse;
+use headers_core::HeaderMapExt;
+use headers_ext::{ContentType, Cookie};
 use http::{header, HeaderMap};
 use hyper::{Method, StatusCode};
 use protocol::JsonPacketStream;
@@ -16,7 +18,6 @@ use serde_json::{Map, Value};
 use std::net::TcpStream;
 use time;
 use time::Tm;
-use typed_headers::{ContentType, Cookie, HeaderMapExt};
 
 struct HttpRequest {
     url: String,
@@ -394,7 +395,7 @@ impl NetworkEventActor {
         let mut mString = "".to_owned();
         if let Some(ref headers) = self.response.headers {
             mString = match headers.typed_get::<ContentType>() {
-                Ok(Some(ContentType(ref mime))) => mime.to_string(),
+                Some(ct) => ct.to_string(),
                 _ => "".to_owned()
             };
         }
@@ -411,7 +412,7 @@ impl NetworkEventActor {
         let mut cookies_size = 0;
         if let Some(ref headers) = self.response.headers {
             cookies_size = match headers.typed_get::<Cookie>() {
-                Ok(Some(ref cookie)) => cookie.len(),
+                Some(ref cookie) => cookie.len(),
                 _ => 0,
             };
         }
@@ -448,7 +449,7 @@ impl NetworkEventActor {
 
     pub fn request_cookies(&self) -> RequestCookiesMsg {
         let cookies_size = match self.request.headers.typed_get::<Cookie>() {
-            Ok(Some(ref cookie)) => cookie.len(),
+            Some(ref cookie) => cookie.len(),
             _ => 0
         };
         RequestCookiesMsg {

@@ -3,15 +3,16 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use filemanager_thread::FileManager;
+use headers_core::HeaderMapExt;
+use headers_ext::{ContentLength, ContentType};
 use http::HeaderMap;
+use http::header::{self, HeaderValue};
 use ipc_channel::ipc;
 use mime::{self, Mime};
-use net_traits::NetworkError;
+use net_traits::{http_percent_encode, NetworkError};
 use net_traits::blob_url_store::parse_blob_url;
 use net_traits::filemanager_thread::ReadFileProgress;
 use servo_url::ServoUrl;
-use typed_headers::{Charset, ContentLength, ContentType, ContentDisposition, DispositionParam, DispositionType};
-use typed_headers::HeaderMapExt;
 
 // TODO: Check on GET
 // https://w3c.github.io/FileAPI/#requestResponseModel
@@ -50,20 +51,26 @@ pub fn load_blob_sync
     let mut headers = HeaderMap::new();
 
     if let Some(name) = blob_buf.filename {
-        let charset = charset.and_then(|c| c.as_str_repr().parse().ok());
-        headers.typed_insert(&ContentDisposition {
-            disposition: DispositionType::Inline,
-            parameters: vec![
-                DispositionParam::Filename(charset.unwrap_or(Charset::Us_Ascii),
-                                           None, name.as_bytes().to_vec())
-            ]
-        });
+        let charset = charset.map(|c| c.as_str_repr()).unwrap_or("us-ascii");
+        // TODO(eijebong): Replace this once the typed header is there
+        headers.insert(
+            header::CONTENT_DISPOSITION,
+            HeaderValue::from_bytes(
+                format!("inline; {}",
+                    if charset.to_lowercase() == "utf-8" {
+                        format!("filename=\"{}\"", String::from_utf8(name.as_bytes().into()).unwrap())
+                    } else {
+                        format!("filename*=\"{}\"''{}", charset, http_percent_encode(name.as_bytes()))
+                    }
+                ).as_bytes()
+            ).unwrap()
+        );
     }
 
     // Basic fetch, Step 4.
-    headers.typed_insert(&ContentLength(blob_buf.size as u64));
+    headers.typed_insert(ContentLength(blob_buf.size as u64));
     // Basic fetch, Step 5.
-    headers.typed_insert(&ContentType(content_type.clone()));
+    headers.typed_insert(ContentType::from(content_type.clone()));
 
     let mut bytes = blob_buf.bytes;
     loop {
@@ -83,3 +90,4 @@ pub fn load_blob_sync
         }
     }
 }
+

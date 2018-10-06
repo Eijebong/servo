@@ -14,6 +14,8 @@ doctest = false
 [dependencies]
 cookie = "0.11"
 embedder_traits = { path = "../embedder_traits" }
+headers-ext = { git = "https://github.com/hyperium/headers.git" }
+headers-core = { git = "https://github.com/hyperium/headers.git" }
 http = "0.1"
 hyper = "0.12"
 hyper_serde = "0.8"
@@ -30,7 +32,6 @@ serde = "1.0"
 servo_arc = {path = "../servo_arc"}
 servo_config = {path = "../config"}
 servo_url = {path = "../url"}
-typed-headers = "0.1"
 url = "1.2"
 uuid = {version = "0.6", features = ["v4", "serde"]}
 webrender_api = {git = "https://github.com/servo/webrender", features = ["ipc"]}
