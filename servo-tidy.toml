@@ -43,7 +43,6 @@ packages = [
   "proc-macro2",
   "quote",
   "rand",
-  "syn",
   "unicase",
   "winapi",
 ]

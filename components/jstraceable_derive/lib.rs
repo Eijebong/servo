@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-extern crate quote;
+extern crate proc_macro2;
 #[macro_use]
 extern crate syn;
 #[macro_use]
@@ -10,15 +10,15 @@ extern crate synstructure;
 
 decl_derive!([JSTraceable] => js_traceable_derive);
 
-fn js_traceable_derive(s: synstructure::Structure) -> quote::Tokens {
+fn js_traceable_derive(s: synstructure::Structure) -> proc_macro2::TokenStream {
     let match_body = s.each(|binding| Some(quote!(#binding.trace(tracer);)));
 
     let ast = s.ast();
-    let name = ast.ident;
+    let name = &ast.ident;
     let (impl_generics, ty_generics, where_clause) = ast.generics.split_for_impl();
     let mut where_clause = where_clause.unwrap_or(&parse_quote!(where)).clone();
     for param in ast.generics.type_params() {
-        let ident = param.ident;
+        let ident = &param.ident;
         where_clause
             .predicates
             .push(parse_quote!(#ident: ::dom::bindings::trace::JSTraceable))

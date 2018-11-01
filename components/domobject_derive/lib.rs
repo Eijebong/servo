@@ -5,10 +5,13 @@
 #![recursion_limit = "128"]
 
 extern crate proc_macro;
+extern crate proc_macro2;
 #[macro_use]
 extern crate quote;
 #[macro_use]
 extern crate syn;
+
+use quote::TokenStreamExt;
 
 #[proc_macro_derive(DomObject)]
 pub fn expand_token_stream(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
@@ -16,7 +19,7 @@ pub fn expand_token_stream(input: proc_macro::TokenStream) -> proc_macro::TokenS
     expand_dom_object(input).into()
 }
 
-fn expand_dom_object(input: syn::DeriveInput) -> quote::Tokens {
+fn expand_dom_object(input: syn::DeriveInput) -> proc_macro2::TokenStream {
     let fields = if let syn::Data::Struct(syn::DataStruct { ref fields, .. }) = input.data {
         fields.iter().collect::<Vec<&syn::Field>>()
     } else {
@@ -62,8 +65,8 @@ fn expand_dom_object(input: syn::DeriveInput) -> quote::Tokens {
         }
     };
 
-    let mut params = quote::Tokens::new();
-    params.append_separated(input.generics.type_params().map(|param| param.ident), ", ");
+    let mut params = proc_macro2::TokenStream::new();
+    params.append_separated(input.generics.type_params().map(|param| &param.ident), ", ");
 
     // For each field in the struct, we implement ShouldNotImplDomObject for a
     // pair of all the type parameters of the DomObject and and the field type.
@@ -87,7 +90,7 @@ fn expand_dom_object(input: syn::DeriveInput) -> quote::Tokens {
         impl #impl_generics ShouldNotImplDomObject for ((#params), __T) #where_clause {}
     });
 
-    let dummy_const = syn::Ident::from(format!("_IMPL_DOMOBJECT_FOR_{}", name));
+    let dummy_const = syn::Ident::new(&format!("_IMPL_DOMOBJECT_FOR_{}", name), proc_macro2::Span::call_site());
     let tokens = quote! {
         #[allow(non_upper_case_globals)]
         const #dummy_const: () = { #items };

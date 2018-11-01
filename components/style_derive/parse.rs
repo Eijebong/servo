@@ -3,7 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use cg;
-use quote::Tokens;
+use proc_macro2::TokenStream;
 use syn::{DeriveInput, Path};
 use synstructure;
 use to_css::CssVariantAttrs;
@@ -15,7 +15,7 @@ pub struct ParseVariantAttrs {
     pub condition: Option<Path>,
 }
 
-pub fn derive(input: DeriveInput) -> Tokens {
+pub fn derive(input: DeriveInput) -> TokenStream {
     let name = &input.ident;
     let s = synstructure::Structure::new(&input);
 
@@ -36,7 +36,7 @@ pub fn derive(input: DeriveInput) -> Tokens {
         let identifier = cg::to_css_identifier(
             &css_variant_attrs
                 .keyword
-                .unwrap_or(variant.ast().ident.as_ref().into()),
+                .unwrap_or(variant.ast().ident.to_string()),
         );
         let ident = &variant.ast().ident;
 
