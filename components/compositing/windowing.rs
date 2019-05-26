@@ -18,10 +18,8 @@ use std::fmt::{Debug, Error, Formatter};
 use std::rc::Rc;
 use std::time::Duration;
 use style_traits::DevicePixel;
-use webrender_api::{
-    DeviceIntPoint, DeviceIntRect, DeviceIntSize, DevicePoint, FramebufferIntRect,
-    FramebufferIntSize, ScrollLocation,
-};
+use webrender_api::ScrollLocation;
+use webrender_api::units::{DeviceIntPoint, DeviceIntRect, DeviceIntSize, DevicePoint, FramebufferIntRect,FramebufferIntSize};
 use webvr::VRServiceManager;
 use webvr_traits::WebVRMainThreadHeartbeat;
 

@@ -41,10 +41,8 @@ use std::rc::Rc;
 use style_traits::viewport::ViewportConstraints;
 use style_traits::{CSSPixel, DevicePixel, PinchZoomFactor};
 use time::{now, precise_time_ns, precise_time_s};
-use webrender_api::{
-    self, DeviceIntPoint, DevicePoint, FramebufferIntSize, HitTestFlags, HitTestResult,
-};
-use webrender_api::{LayoutVector2D, ScrollLocation};
+use webrender_api::{self, HitTestFlags, HitTestResult, ScrollLocation};
+use webrender_api::units::{DeviceIntPoint, DevicePoint, DeviceIntSize, LayoutVector2D};
 use webvr_traits::WebVRMainThreadHeartbeat;
 
 #[derive(Debug, PartialEq)]
@@ -583,7 +581,7 @@ impl<Window: WindowMethods + ?Sized> IOCompositor<Window> {
 
         self.webrender_api.set_document_view(
             self.webrender_document,
-            self.embedder_coordinates.get_flipped_viewport(),
+            self.embedder_coordinates.viewport,
             self.embedder_coordinates.hidpi_factor.get(),
         );
 
@@ -676,7 +674,7 @@ impl<Window: WindowMethods + ?Sized> IOCompositor<Window> {
         let dppx = self.page_zoom * self.hidpi_factor();
         let scaled_point = (point / dppx).to_untyped();
 
-        let world_cursor = webrender_api::WorldPoint::from_untyped(&scaled_point);
+        let world_cursor = webrender_api::units::WorldPoint::from_untyped(&scaled_point);
         self.webrender_api.hit_test(
             self.webrender_document,
             None,
@@ -781,7 +779,7 @@ impl<Window: WindowMethods + ?Sized> IOCompositor<Window> {
                 self.pending_scroll_zoom_events.push(ScrollZoomEvent {
                     magnification: magnification,
                     scroll_location: ScrollLocation::Delta(
-                        webrender_api::LayoutVector2D::from_untyped(&scroll_delta.to_untyped()),
+                        LayoutVector2D::from_untyped(&scroll_delta.to_untyped()),
                     ),
                     cursor: cursor,
                     event_count: 1,
@@ -866,7 +864,7 @@ impl<Window: WindowMethods + ?Sized> IOCompositor<Window> {
                     *last_combined_event = Some(ScrollZoomEvent {
                         magnification: scroll_event.magnification,
                         scroll_location: ScrollLocation::Delta(
-                            webrender_api::LayoutVector2D::from_untyped(&this_delta.to_untyped()),
+                            LayoutVector2D::from_untyped(&this_delta.to_untyped()),
                         ),
                         cursor: this_cursor,
                         event_count: 1,
@@ -898,15 +896,14 @@ impl<Window: WindowMethods + ?Sized> IOCompositor<Window> {
                     let scaled_delta = (TypedVector2D::from_untyped(&delta.to_untyped()) /
                         self.scale)
                         .to_untyped();
-                    let calculated_delta =
-                        webrender_api::LayoutVector2D::from_untyped(&scaled_delta);
+                    let calculated_delta = LayoutVector2D::from_untyped(&scaled_delta);
                     ScrollLocation::Delta(calculated_delta)
                 },
                 // Leave ScrollLocation unchanged if it is Start or End location.
                 sl @ ScrollLocation::Start | sl @ ScrollLocation::End => sl,
             };
             let cursor = (combined_event.cursor.to_f32() / self.scale).to_untyped();
-            let cursor = webrender_api::WorldPoint::from_untyped(&cursor);
+            let cursor = webrender_api::units::WorldPoint::from_untyped(&cursor);
             let mut txn = webrender_api::Transaction::new();
             txn.scroll(scroll_location, cursor);
             if combined_event.magnification != 1.0 {
@@ -1098,7 +1095,7 @@ impl<Window: WindowMethods + ?Sized> IOCompositor<Window> {
                 for (id, _) in &self.pipeline_details {
                     let webrender_pipeline_id = id.to_webrender();
                     if let Some(webrender_api::Epoch(epoch)) =
-                        self.webrender.current_epoch(webrender_pipeline_id)
+                        self.webrender.current_epoch(self.webrender_document, webrender_pipeline_id)
                     {
                         let epoch = Epoch(epoch);
                         pipeline_epochs.insert(*id, epoch);
@@ -1214,8 +1211,8 @@ impl<Window: WindowMethods + ?Sized> IOCompositor<Window> {
             || {
                 debug!("compositor: compositing");
 
-                let size = FramebufferIntSize::from_untyped(
-                    &self.embedder_coordinates.framebuffer.to_untyped(),
+                let size = DeviceIntSize::from_untyped(
+                    &self.embedder_coordinates.framebuffer.to_untyped()
                 );
 
                 // Paint the scene.
@@ -1236,7 +1233,7 @@ impl<Window: WindowMethods + ?Sized> IOCompositor<Window> {
             for (id, pending_epoch) in &self.pending_paint_metrics {
                 // we get the last painted frame id from webrender
                 if let Some(webrender_api::Epoch(epoch)) =
-                    self.webrender.current_epoch(id.to_webrender())
+                    self.webrender.current_epoch(self.webrender_document, id.to_webrender())
                 {
                     // and check if it is the one the layout thread is expecting,
                     let epoch = Epoch(epoch);
@@ -1335,7 +1332,7 @@ impl<Window: WindowMethods + ?Sized> IOCompositor<Window> {
         gl.clear(gleam::gl::COLOR_BUFFER_BIT);
 
         // Make the viewport white.
-        let viewport = self.embedder_coordinates.get_flipped_viewport();
+        let viewport = self.embedder_coordinates.viewport;
         gl.scissor(
             viewport.origin.x,
             viewport.origin.y,

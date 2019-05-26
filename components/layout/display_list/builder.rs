@@ -66,10 +66,10 @@ use style::values::{Either, RGBA};
 use style_traits::ToCss;
 use webrender_api::{
     self, BorderDetails, BorderRadius, BorderSide, BoxShadowClipMode, ColorF, ColorU,
-    ExternalScrollId, FilterOp, GlyphInstance, ImageRendering, LayoutRect, LayoutSize,
-    LayoutTransform, LayoutVector2D, LineStyle, NinePatchBorder, NinePatchBorderSource,
-    NormalBorder, ScrollSensitivity, StickyOffsetBounds,
+    ExternalScrollId, FilterOp, GlyphInstance, ImageRendering, LineStyle, NinePatchBorder,
+    NinePatchBorderSource, NormalBorder, ScrollSensitivity, StickyOffsetBounds,
 };
+use webrender_api::units::{LayoutRect, LayoutSize, LayoutTransform, LayoutVector2D};
 
 static THREAD_TINT_COLORS: [ColorF; 8] = [
     ColorF {
@@ -2840,6 +2840,11 @@ impl BaseFlow {
             None,
             DisplayListSection::Content,
         );
+
+
+        let info = webrender_api::CommonItemProperties {
+        };
+
         state.add_display_item(DisplayItem::Border(CommonDisplayItem::with_data(
             base,
             webrender_api::BorderDisplayItem {
@@ -2848,6 +2853,8 @@ impl BaseFlow {
                     color,
                     webrender_api::BorderStyle::Solid,
                 )),
+                bounds: stacking_context_relative_bounds.inflate(Au::from_px(2), Au::from_px(2)).to_layout(),
+                common: info,
             },
             Vec::new(),
         )));
