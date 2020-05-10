@@ -9,7 +9,7 @@ use crate::embedder::EmbedderCallbacks;
 use crate::events_loop::EventsLoop;
 use crate::window_trait::WindowPortsMethods;
 use crate::{headed_window, headless_window};
-use winit::WindowId;
+use winit::window::WindowId;
 use servo::compositing::windowing::WindowEvent;
 use servo::config::opts::{self, parse_url_or_filename};
 use servo::servo_config::pref;
@@ -27,8 +27,7 @@ thread_local! {
 }
 
 pub struct App {
-    events_loop: Rc<RefCell<EventsLoop>>,
-    servo: RefCell<Servo<dyn WindowPortsMethods>>,
+    servo: Option<Servo<dyn WindowPortsMethods>>,
     browser: RefCell<Browser<dyn WindowPortsMethods>>,
     event_queue: RefCell<Vec<WindowEvent>>,
     suspended: Cell<bool>,
@@ -48,30 +47,29 @@ impl App {
         } else {
             Rc::new(headed_window::Window::new(
                 opts::get().initial_window_size,
-                events_loop.clone(),
+                &events_loop,
                 no_native_titlebar,
                 device_pixels_per_px,
             ))
         };
 
-        let xr_discovery = if pref!(dom.webxr.glwindow.enabled) {
+        let xr_discovery = /*if pref!(dom.webxr.glwindow.enabled) {
             let window = window.clone();
             let surfman = window.webrender_surfman();
-            let events_loop = events_loop.clone();
-            let factory = Box::new(move || Ok(window.new_glwindow(&*events_loop.borrow())));
+            let factory = Box::new(|| Ok(window.new_glwindow(&events_loop)));
             Some(GlWindowDiscovery::new(
                 surfman.connection(),
                 surfman.adapter(),
                 surfman.context_attributes(),
                 factory,
             ))
-        } else {
-            None
-        };
+        } else {*/
+            None;
+        //};
 
         // Implements embedder methods, used by libservo and constellation.
         let embedder = Box::new(EmbedderCallbacks::new(
-            events_loop.clone(),
+            events_loop.create_event_loop_waker(),
             xr_discovery,
         ));
 
@@ -87,13 +85,12 @@ impl App {
 
         let app = App {
             event_queue: RefCell::new(vec![]),
-            events_loop,
             browser: RefCell::new(browser),
-            servo: RefCell::new(servo),
+            servo: Some(servo),
             suspended: Cell::new(false),
         };
 
-        app.run_loop();
+        app.run_loop(events_loop);
     }
 
     fn get_events(&self) -> Vec<WindowEvent> {
@@ -101,87 +98,81 @@ impl App {
     }
 
     // This function decides whether the event should be handled during `run_forever`.
-    fn winit_event_to_servo_event(&self, event: winit::Event) -> winit::ControlFlow {
+    fn winit_event_to_servo_event(&self, event: winit::event::Event<()>) {
         match event {
             // App level events
-            winit::Event::Suspended(suspended) => {
-                self.suspended.set(suspended);
-                if !suspended {
-                    self.event_queue.borrow_mut().push(WindowEvent::Idle);
-                }
+            winit::event::Event::Suspended => {
+                self.suspended.set(true);
             },
-            winit::Event::Awakened => {
+            winit::event::Event::Resumed => {
+                self.suspended.set(false);
                 self.event_queue.borrow_mut().push(WindowEvent::Idle);
             },
-            winit::Event::DeviceEvent { .. } => {},
+            // XXX: This was Awakened
+            winit::event::Event::UserEvent(_) => {
+                self.event_queue.borrow_mut().push(WindowEvent::Idle);
+            },
+            winit::event::Event::DeviceEvent { .. } => {},
+
+            winit::event::Event::RedrawRequested(_) => {
+                self.event_queue.borrow_mut().push(WindowEvent::Refresh);
+            },
 
             // Window level events
-            winit::Event::WindowEvent {
+            winit::event::Event::WindowEvent {
                 window_id, event, ..
             } => {
                 return WINDOWS.with(|windows| {
                     match windows.borrow().get(&window_id) {
                         None => {
                             warn!("Got an event from unknown window");
-                            winit::ControlFlow::Break
                         },
                         Some(window) => {
-                            // Resize events need to be handled during run_forever
-                            let cont = if let winit::WindowEvent::Resized(_) = event {
-                                winit::ControlFlow::Continue
-                            } else {
-                                winit::ControlFlow::Break
-                            };
                             window.winit_event_to_servo_event(event);
-                            return cont;
                         },
                     }
                 });
             },
+            _ => {},
         }
-        winit::ControlFlow::Break
     }
 
-    fn run_loop(self) {
-        loop {
+    fn run_loop(mut self, event_loop: EventsLoop) {
+        event_loop.run_forever(move |e, control_flow| {
+            // If self.servo is None here, it means that we're in the process of shutting down,
+            // let's ignore events.
+            if self.servo.is_none() {
+                return;
+            }
+
+            // Handle the event
+            self.winit_event_to_servo_event(e);
+
             let animating = WINDOWS.with(|windows| {
                 windows
                     .borrow()
                     .iter()
                     .any(|(_, window)| window.is_animating())
             });
+
+            // Block until the window gets an event
             if !animating || self.suspended.get() {
-                // If there's no animations running then we block on the window event loop.
-                self.events_loop.borrow_mut().run_forever(|e| {
-                    let cont = self.winit_event_to_servo_event(e);
-                    if cont == winit::ControlFlow::Continue {
-                        // Note we need to be careful to make sure that any events
-                        // that are handled during run_forever aren't re-entrant,
-                        // since we are handling them while holding onto a mutable borrow
-                        // of the events loop
-                        self.handle_events();
-                    }
-                    cont
-                });
+                *control_flow = winit::event_loop::ControlFlow::Wait;
+            } else {
+                *control_flow = winit::event_loop::ControlFlow::Poll;
             }
-            // Grab any other events that may have happened
-            self.events_loop.borrow_mut().poll_events(|e| {
-                self.winit_event_to_servo_event(e);
-            });
-            // If animations are running, we block on compositing
-            // (self.handle_events() ends up calling swap_buffers)
+
             let stop = self.handle_events();
             if stop {
-                break;
+                *control_flow = winit::event_loop::ControlFlow::Exit;
+                self.servo.take().unwrap().deinit();
             }
-        }
 
-        self.servo.into_inner().deinit()
+        });
     }
 
-    fn handle_events(&self) -> bool {
+    fn handle_events(&mut self) -> bool {
         let mut browser = self.browser.borrow_mut();
-        let mut servo = self.servo.borrow_mut();
 
         // FIXME:
         // As of now, we support only one browser (self.browser)
@@ -206,21 +197,21 @@ impl App {
 
         browser.handle_window_events(app_events);
 
-        let mut servo_events = servo.get_events();
+        let mut servo_events = self.servo.as_mut().unwrap().get_events();
         loop {
             browser.handle_servo_events(servo_events);
-            servo.handle_events(browser.get_events());
+            self.servo.as_mut().unwrap().handle_events(browser.get_events());
             if browser.shutdown_requested() {
                 return true;
             }
-            servo_events = servo.get_events();
+            servo_events = self.servo.as_mut().unwrap().get_events();
             if servo_events.is_empty() {
                 break;
             }
         }
 
         if need_resize {
-            servo.repaint_synchronously();
+            self.servo.as_mut().unwrap().repaint_synchronously();
         }
         false
     }

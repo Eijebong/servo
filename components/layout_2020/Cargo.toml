@@ -29,7 +29,7 @@ log = "0.4"
 msg = {path = "../msg"}
 mitochondria = "1.1.2"
 net_traits = {path = "../net_traits"}
-parking_lot = "0.9"
+parking_lot = "0.10.2"
 range = {path = "../range"}
 rayon = "1"
 rayon_croissant = "0.2.0"
