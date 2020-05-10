@@ -6,10 +6,11 @@
 
 use crate::browser::Browser;
 use crate::embedder::EmbedderCallbacks;
-use crate::events_loop::EventsLoop;
+use crate::events_loop::{EventsLoop, ServoEvent};
 use crate::window_trait::WindowPortsMethods;
 use crate::{headed_window, headless_window};
 use winit::window::WindowId;
+use winit::event_loop::EventLoopWindowTarget;
 use servo::compositing::windowing::WindowEvent;
 use servo::config::opts::{self, parse_url_or_filename};
 use servo::servo_config::pref;
@@ -53,44 +54,79 @@ impl App {
             ))
         };
 
-        let xr_discovery = /*if pref!(dom.webxr.glwindow.enabled) {
-            let window = window.clone();
-            let surfman = window.webrender_surfman();
-            let factory = Box::new(|| Ok(window.new_glwindow(&events_loop)));
-            Some(GlWindowDiscovery::new(
-                surfman.connection(),
-                surfman.adapter(),
-                surfman.context_attributes(),
-                factory,
-            ))
-        } else {*/
-            None;
-        //};
-
-        // Implements embedder methods, used by libservo and constellation.
-        let embedder = Box::new(EmbedderCallbacks::new(
-            events_loop.create_event_loop_waker(),
-            xr_discovery,
-        ));
-
         // Handle browser state.
         let browser = Browser::new(window.clone());
 
-        let mut servo = Servo::new(embedder, window.clone(), user_agent);
-        let browser_id = BrowserId::new();
-        servo.handle_events(vec![WindowEvent::NewBrowser(get_default_url(), browser_id)]);
-        servo.setup_logging();
-
-        register_window(window);
-
-        let app = App {
+        let mut app = App {
             event_queue: RefCell::new(vec![]),
             browser: RefCell::new(browser),
-            servo: Some(servo),
+            servo: None,
             suspended: Cell::new(false),
         };
 
-        app.run_loop(events_loop);
+        let ev_waker = events_loop.create_event_loop_waker();
+        events_loop.run_forever(move |e, w, control_flow| {
+            if let winit::event::Event::NewEvents(winit::event::StartCause::Init) = e {
+                let surfman = window.webrender_surfman();
+
+                let xr_discovery = if pref!(dom.webxr.glwindow.enabled) {
+                    let window = window.clone();
+                    let w = unsafe { std::mem::transmute::<&EventLoopWindowTarget<ServoEvent>, &'static EventLoopWindowTarget<ServoEvent>>(w.unwrap()) };
+                    let factory = Box::new(move || Ok(window.new_glwindow(w)));
+                    Some(GlWindowDiscovery::new(
+                        surfman.connection(),
+                        surfman.adapter(),
+                        surfman.context_attributes(),
+                        factory,
+                    ))
+                } else { None };
+
+                let window = window.clone();
+                // Implements embedder methods, used by libservo and constellation.
+                let embedder = Box::new(EmbedderCallbacks::new(
+                    ev_waker.clone(),
+                    xr_discovery,
+                ));
+
+                let mut servo = Servo::new(embedder, window.clone(), user_agent.clone());
+                let browser_id = BrowserId::new();
+                servo.handle_events(vec![WindowEvent::NewBrowser(get_default_url(), browser_id)]);
+                servo.setup_logging();
+
+                register_window(window.clone());
+                app.servo = Some(servo);
+            }
+
+            // If self.servo is None here, it means that we're in the process of shutting down,
+            // let's ignore events.
+            if app.servo.is_none() {
+                return;
+            }
+
+            // Handle the event
+            app.winit_event_to_servo_event(e);
+
+            let animating = WINDOWS.with(|windows| {
+                windows
+                    .borrow()
+                    .iter()
+                    .any(|(_, window)| window.is_animating())
+            });
+
+            // Block until the window gets an event
+            if !animating || app.suspended.get() {
+                *control_flow = winit::event_loop::ControlFlow::Wait;
+            } else {
+                *control_flow = winit::event_loop::ControlFlow::Poll;
+            }
+
+            let stop = app.handle_events();
+            if stop {
+                *control_flow = winit::event_loop::ControlFlow::Exit;
+                app.servo.take().unwrap().deinit();
+            }
+
+        });
     }
 
     fn get_events(&self) -> Vec<WindowEvent> {
@@ -98,7 +134,7 @@ impl App {
     }
 
     // This function decides whether the event should be handled during `run_forever`.
-    fn winit_event_to_servo_event(&self, event: winit::event::Event<()>) {
+    fn winit_event_to_servo_event(&self, event: winit::event::Event<ServoEvent>) {
         match event {
             // App level events
             winit::event::Event::Suspended => {
@@ -138,37 +174,6 @@ impl App {
     }
 
     fn run_loop(mut self, event_loop: EventsLoop) {
-        event_loop.run_forever(move |e, control_flow| {
-            // If self.servo is None here, it means that we're in the process of shutting down,
-            // let's ignore events.
-            if self.servo.is_none() {
-                return;
-            }
-
-            // Handle the event
-            self.winit_event_to_servo_event(e);
-
-            let animating = WINDOWS.with(|windows| {
-                windows
-                    .borrow()
-                    .iter()
-                    .any(|(_, window)| window.is_animating())
-            });
-
-            // Block until the window gets an event
-            if !animating || self.suspended.get() {
-                *control_flow = winit::event_loop::ControlFlow::Wait;
-            } else {
-                *control_flow = winit::event_loop::ControlFlow::Poll;
-            }
-
-            let stop = self.handle_events();
-            if stop {
-                *control_flow = winit::event_loop::ControlFlow::Exit;
-                self.servo.take().unwrap().deinit();
-            }
-
-        });
     }
 
     fn handle_events(&mut self) -> bool {

@@ -12,10 +12,15 @@ use std::rc::Rc;
 use std::cell::RefCell;
 use std::time;
 
+#[derive(Debug)]
+pub enum ServoEvent {
+    Awakened,
+}
+
 #[allow(dead_code)]
 enum EventLoop {
     /// A real Winit windowing event loop.
-    Winit(Option<winit::event_loop::EventLoop<()>>),
+    Winit(Option<winit::event_loop::EventLoop<ServoEvent>>),
     /// A fake event loop which contains a signalling flag used to ensure
     /// that pending events get processed in a timely fashion, and a condition
     /// variable to allow waiting on that flag changing state.
@@ -36,7 +41,7 @@ impl EventsLoop {
         EventsLoop(if headless {
             EventLoop::Headless(Arc::new((Mutex::new(false), Condvar::new())))
         } else {
-            EventLoop::Winit(Some(winit::event_loop::EventLoop::new()))
+            EventLoop::Winit(Some(winit::event_loop::EventLoop::with_user_event()))
         })
     }
 }
@@ -54,7 +59,7 @@ impl EventsLoop {
                 Box::new(HeadlessEventLoopWaker(data.clone())),
         }
     }
-    pub fn as_winit(&self) -> &winit::event_loop::EventLoop<()> {
+    pub fn as_winit(&self) -> &winit::event_loop::EventLoop<ServoEvent> {
         match self.0 {
             EventLoop::Winit(Some(ref event_loop)) => event_loop,
             EventLoop::Winit(None) | EventLoop::Headless(..) =>
@@ -62,12 +67,12 @@ impl EventsLoop {
         }
     }
 
-    pub fn run_forever<F: 'static>(mut self, mut callback: F) where F: FnMut(winit::event::Event<()>, &mut winit::event_loop::ControlFlow) {
+    pub fn run_forever<F: 'static>(mut self, mut callback: F) where F: FnMut(winit::event::Event<ServoEvent>, Option<&winit::event_loop::EventLoopWindowTarget<ServoEvent>>, &mut winit::event_loop::ControlFlow) {
         match self.0 {
             EventLoop::Winit(mut events_loop) => {
                 let mut events_loop = events_loop
                     .expect("Can't run an unavailable event loop.");
-                events_loop.run(move |e, _, ref mut control_flow| callback(e, control_flow));
+                events_loop.run(move |e, window_target, ref mut control_flow| callback(e, Some(window_target), control_flow));
             }
             EventLoop::Headless(ref data) => {
                 let &(ref flag, ref condvar) = &**data;
@@ -75,7 +80,7 @@ impl EventsLoop {
                     self.sleep(flag, condvar);
                     let mut control_flow = winit::event_loop::ControlFlow::Poll;
 
-                    callback(winit::event::Event::<()>::UserEvent(()), &mut control_flow);
+                    callback(winit::event::Event::<ServoEvent>::UserEvent(ServoEvent::Awakened), None, &mut control_flow);
                     if control_flow != winit::event_loop::ControlFlow::Poll {
                         *flag.lock().unwrap() = false;
                     } else if control_flow == winit::event_loop::ControlFlow::Exit {
@@ -101,10 +106,10 @@ impl EventsLoop {
 }
 
 struct HeadedEventLoopWaker {
-    proxy: Arc<Mutex<winit::event_loop::EventLoopProxy<()>>>,
+    proxy: Arc<Mutex<winit::event_loop::EventLoopProxy<ServoEvent>>>,
 }
 impl HeadedEventLoopWaker {
-    fn new(events_loop: &winit::event_loop::EventLoop<()>) -> HeadedEventLoopWaker {
+    fn new(events_loop: &winit::event_loop::EventLoop<ServoEvent>) -> HeadedEventLoopWaker {
         let proxy = Arc::new(Mutex::new(events_loop.create_proxy()));
         HeadedEventLoopWaker { proxy }
     }
@@ -112,7 +117,7 @@ impl HeadedEventLoopWaker {
 impl EventLoopWaker for HeadedEventLoopWaker {
     fn wake(&self) {
         // Kick the OS event loop awake.
-        if let Err(err) = self.proxy.lock().unwrap().send_event(()) {
+        if let Err(err) = self.proxy.lock().unwrap().send_event(ServoEvent::Awakened) {
             warn!("Failed to wake up event loop ({}).", err);
         }
     }

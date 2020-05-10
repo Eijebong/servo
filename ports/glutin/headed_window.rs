@@ -4,7 +4,7 @@
 
 //! A winit window implementation.
 
-use crate::events_loop::EventsLoop;
+use crate::events_loop::{EventsLoop, ServoEvent};
 use crate::keyutils::keyboard_event_from_winit;
 use crate::window_trait::{WindowPortsMethods, LINE_HEIGHT};
 use euclid::{
@@ -453,7 +453,7 @@ impl WindowPortsMethods for Window {
         }
     }
 
-    fn new_glwindow(&self, events_loop: &EventsLoop) -> Box<dyn webxr::glwindow::GlWindow> {
+    fn new_glwindow(&self, event_loop: &winit::event_loop::EventLoopWindowTarget<ServoEvent>) -> Box<dyn webxr::glwindow::GlWindow> {
         let size = self.winit_window.outer_size();
 
         let mut window_builder = winit::window::WindowBuilder::new()
@@ -463,7 +463,7 @@ impl WindowPortsMethods for Window {
 
         window_builder = builder_with_platform_options(window_builder);
 
-        let winit_window = window_builder.build(events_loop.as_winit())
+        let winit_window = window_builder.build(event_loop)
             .expect("Failed to create window.");
 
         let pose = Rc::new(XRWindowPose {

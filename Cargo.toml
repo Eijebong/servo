@@ -36,3 +36,7 @@ surfman = { path = "../surfman/surfman" }
 
 [patch."https://github.com/servo/surfman"]
 surfman = { path = "../surfman/surfman" }
+
+[patch."https://github.com/servo/webxr"]
+webxr = { path = "../webxr/webxr" }
+webxr-api = { path = "../webxr/webxr-api" }
